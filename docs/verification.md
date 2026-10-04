@@ -6,6 +6,7 @@
 - 26 Playwright checks passed against the production build in Chromium and WebKit. The final desktop sizing adjustment was checked again with six targeted browser checks.
 - Browser checks cover complete rounds, split-hand progression, stats, CSV downloads, saved and unfinished sessions, editable wagers, reset confirmation, keyboard actions and reduced motion.
 - Animation checks sample frames throughout dealing and splitting. They assert that cards stay within the horizontal viewport, above the controls, and outside clipping ancestors. A 19-card hand was also checked at 320 pixels wide.
+- The first Linux CI run exposed throttled WebKit compositor callbacks (two frames in 2.4 seconds). The sampler now combines animation-frame callbacks with fresh layout measurements every 16ms and requires more than 30 samples; every geometry assertion is retained. CI runs one browser worker at a time to reduce rendering contention.
 - Responsive dimensions: 320×667, 375×812, 390×844, 768×1024, 844×390, 1024×768 and 1536×1024.
 - TypeScript and the Vite production build passed. Dependency audit: zero known vulnerabilities at verification time.
 
