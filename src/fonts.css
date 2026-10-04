@@ -1,0 +1,15 @@
+@font-face {
+  font-family: 'Cormorant Garamond Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 300 700;
+  src: url('@fontsource-variable/cormorant-garamond/files/cormorant-garamond-latin-wght-normal.woff2')
+    format('woff2');
+}
+@font-face {
+  font-family: 'DM Sans Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 1000;
+  src: url('@fontsource-variable/dm-sans/files/dm-sans-latin-wght-normal.woff2') format('woff2');
+}
