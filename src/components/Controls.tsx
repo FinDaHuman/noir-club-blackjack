@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Coins, Minus, Plus, RotateCcw, ArrowUpRight } from 'lucide-react';
-import { canBet, canDouble, canSplit, credits, type Action, type Game } from '../game';
+import {
+  canBet,
+  canDouble,
+  canSplit,
+  canSurrender,
+  credits,
+  type Action,
+  type Game,
+} from '../game';
 export function Controls({
   game,
   act,
@@ -36,7 +44,11 @@ export function Controls({
           <Coins size={24} strokeWidth={1.35} />
           <strong>{credits(game.balance)}</strong>
         </div>
-        <small>VIRTUAL CREDITS</small>
+        <small>
+          {game.insuranceBet && !betting
+            ? `INSURANCE ${credits(game.insuranceBet)}`
+            : 'VIRTUAL CREDITS'}
+        </small>
       </div>
       <div className="bet-controls">
         <label className="eyeline" htmlFor="wager">
@@ -91,7 +103,9 @@ export function Controls({
           </button>
         ))}
       </div>
-      <div className={`actions ${betting ? 'betting-actions' : ''}`}>
+      <div
+        className={`actions ${betting ? 'betting-actions' : game.phase === 'insurance' ? 'insurance-actions' : 'playing-actions'}`}
+      >
         {betting ? (
           <button
             className="primary deal-button"
@@ -109,6 +123,19 @@ export function Controls({
               </>
             )}
           </button>
+        ) : game.phase === 'insurance' ? (
+          <>
+            <button className="primary" onClick={() => act({ type: 'DECLINE_INSURANCE' })}>
+              No insurance
+            </button>
+            <button
+              className="secondary"
+              disabled={game.balance < game.hands[0].bet / 2}
+              onClick={() => act({ type: 'INSURE' })}
+            >
+              Insure · {credits(game.hands[0].bet / 2)}
+            </button>
+          </>
         ) : (
           <>
             <button className="primary" disabled={!playing} onClick={() => act({ type: 'HIT' })}>
@@ -135,6 +162,13 @@ export function Controls({
             >
               Split <kbd>P</kbd>
             </button>
+            <button
+              className="secondary surrender-button"
+              disabled={!canSurrender(game)}
+              onClick={() => act({ type: 'SURRENDER' })}
+            >
+              Surrender <kbd>R</kbd>
+            </button>
           </>
         )}
         <small className="action-hint">
@@ -142,11 +176,15 @@ export function Controls({
             ? 'Reset your session for 2,500 credits'
             : betting
               ? 'A little luck. A little instinct.'
-              : playing
-                ? 'Make your next move'
-                : game.phase === 'dealer'
-                  ? 'Dealer is playing…'
-                  : 'Cards in motion…'}
+              : game.phase === 'insurance'
+                ? `Optional side bet · pays 2:1 on dealer blackjack${game.balance < game.hands[0].bet / 2 ? ' · insufficient credits' : ''}`
+                : game.phase === 'peeking'
+                  ? 'Dealer is checking the hidden card…'
+                  : playing
+                    ? 'Make your next move'
+                    : game.phase === 'dealer'
+                      ? 'Dealer is playing…'
+                      : 'Cards in motion…'}
         </small>
       </div>
     </footer>

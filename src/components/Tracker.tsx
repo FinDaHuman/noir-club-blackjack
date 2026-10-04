@@ -99,7 +99,7 @@ export function Dialog({
 }
 function exportHistory(game: Game) {
   const csv = [
-    'Round,Time,Player,Dealer,Wager,Net,Balance,Results',
+    'Round,Time,Player,Dealer,Wager,Net,Balance,Results,Insurance bet,Insurance net',
     ...game.history.map((r) =>
       [
         r.id,
@@ -110,6 +110,8 @@ function exportHistory(game: Game) {
         r.net,
         r.balance,
         r.results.join(' / '),
+        r.insuranceBet,
+        r.insuranceNet,
       ].join(','),
     ),
   ].join('\n');
@@ -154,6 +156,8 @@ export function Tracker({
           ['Win rate', s.hands ? `${Math.round((s.wins / s.hands) * 100)}%` : '—'],
           ['Wins / losses / pushes', `${s.wins} / ${s.losses} / ${s.pushes}`],
           ['Blackjacks', s.blackjacks],
+          ['Surrenders (included in losses)', s.surrenders],
+          ['Insurance wagered / net', `${credits(s.insuranceWagered)} / ${signed(s.insuranceNet)}`],
           ['Best win', signed(s.bestWin)],
           ['Best win streak', s.bestStreak],
           ['Total wagered', credits(s.wagered)],
@@ -204,7 +208,12 @@ export function Tracker({
                     ))}
                   </td>
                   <td>{r.dealer > 21 ? 'Bust' : r.dealer}</td>
-                  <td>{r.results.join(' / ')}</td>
+                  <td>
+                    {r.results.join(' / ')}
+                    {r.insuranceBet > 0 && (
+                      <small className="insurance-result">Insurance {signed(r.insuranceNet)}</small>
+                    )}
+                  </td>
                   <td className={r.net < 0 ? 'negative' : 'positive'}>{signed(r.net)}</td>
                 </tr>
               ))}
@@ -259,17 +268,27 @@ export function Rules({ close }: { close: () => void }) {
           </p>
         </li>
         <li>
+          <b>Insurance & late surrender.</b>
+          <p>
+            Against an Ace, accept or decline a half-bet insurance wager before the dealer peeks.
+            Insurance pays 2:1 on dealer blackjack. Against an Ace or a ten-value card, the dealer
+            visibly checks the hole card. Once blackjack is ruled out, you may surrender your
+            original two-card hand for half your wager back. No surrender after hitting, doubling or
+            splitting.
+          </p>
+        </li>
+        <li>
           <b>Your table, your pace.</b>
           <p>
-            Wagers: 10–500 virtual credits in steps of 5. No insurance or surrender. No purchases or
-            cash-out. Reset your session in the tracker for a fresh 2,500 credits.
+            Wagers: 10–500 virtual credits in steps of 5. No purchases or cash-out. Reset your
+            session in the tracker for a fresh 2,500 credits.
           </p>
         </li>
       </ol>
       <div className="shortcuts">
         <span>Keyboard</span>
         <kbd>Space</kbd> Deal <kbd>H</kbd> Hit <kbd>S</kbd> Stand <kbd>D</kbd> Double <kbd>P</kbd>{' '}
-        Split
+        Split <kbd>R</kbd> Surrender
       </div>
       <p className="rules-note">
         Music and effects begin with your first interaction. Control each separately at the top of

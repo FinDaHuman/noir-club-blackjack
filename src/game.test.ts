@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   canDouble,
   canSplit,
+  canSurrender,
   loadGame,
   makeShoe,
   natural,
@@ -18,13 +19,23 @@ function deal(...ranks: string[]) {
   return reducer(newGame([...cards(...ranks), ...makeShoe()]), { type: 'DEAL' });
 }
 function ready(...ranks: string[]) {
-  return reducer(deal(...ranks), { type: 'READY' });
+  let g = reducer(deal(...ranks), { type: 'READY' });
+  if (g.phase === 'insurance') g = reducer(g, { type: 'DECLINE_INSURANCE' });
+  if (g.phase === 'peeking') g = reducer(g, { type: 'READY' });
+  return g;
 }
 function finish(state: Game) {
   let g = state;
   for (let i = 0; i < 100 && g.phase !== 'settled'; i++)
     g = reducer(g, {
-      type: g.phase === 'player' ? 'STAND' : g.phase === 'dealer' ? 'DEALER_TICK' : 'READY',
+      type:
+        g.phase === 'insurance'
+          ? 'DECLINE_INSURANCE'
+          : g.phase === 'player'
+            ? 'STAND'
+            : g.phase === 'dealer'
+              ? 'DEALER_TICK'
+              : 'READY',
     });
   expect(g.phase).toBe('settled');
   return g;
@@ -92,7 +103,8 @@ describe('actions, split rules and accounting', () => {
   it('locks duplicate deal and hit during motion', () => {
     const g = deal('5', '10', '6', '7');
     expect(reducer(g, { type: 'DEAL' })).toBe(g);
-    const hit = reducer(reducer(g, { type: 'READY' }), { type: 'HIT' });
+    const hit = reducer(ready('5', '10', '6', '7'), { type: 'HIT' });
+    expect(hit.phase).toBe('hitting');
     expect(reducer(hit, { type: 'HIT' })).toBe(hit);
   });
   it('double deducts an extra wager and draws exactly one card', () => {
@@ -186,6 +198,123 @@ describe('actions, split rules and accounting', () => {
       },
     });
     expect(loadGame().phase).toBe('betting');
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('dealer peek, insurance and late surrender', () => {
+  it.each(['10', 'J', 'Q', 'K'])('peeks on %s before any player action', (rank) => {
+    const g = reducer(deal('9', rank, '7', '6'), { type: 'READY' });
+    expect(g.phase).toBe('peeking');
+    for (const type of ['HIT', 'SURRENDER', 'INSURE', 'DOUBLE', 'STAND'] as const)
+      expect(reducer(g, { type })).toBe(g);
+    expect(reducer(g, { type: 'READY' }).phase).toBe('player');
+  });
+  it('offers insurance before an Ace peek and locks all other actions', () => {
+    const g = reducer(deal('9', 'A', '7', 'K'), { type: 'READY' });
+    expect(g.phase).toBe('insurance');
+    for (const type of ['READY', 'HIT', 'SURRENDER', 'DEAL', 'RESET'] as const)
+      expect(reducer(g, { type })).toBe(g);
+    const peek = reducer(g, { type: 'DECLINE_INSURANCE' });
+    expect(peek.phase).toBe('peeking');
+    expect(reducer(peek, { type: 'READY' }).balance).toBe(2450);
+  });
+  it('returns insurance stake plus 2:1 winnings, exactly once', () => {
+    const offer = reducer(deal('9', 'A', '7', 'K'), { type: 'READY' });
+    const insured = reducer(offer, { type: 'INSURE' });
+    expect(insured.balance).toBe(2425);
+    expect(reducer(insured, { type: 'INSURE' })).toBe(insured);
+    const g = reducer(insured, { type: 'READY' });
+    expect(g.balance).toBe(2500);
+    expect(g.stats).toMatchObject({
+      net: 0,
+      wagered: 75,
+      losses: 1,
+      insuranceWagered: 25,
+      insuranceNet: 50,
+    });
+    expect(g.history[0]).toMatchObject({ net: 0, insuranceBet: 25, insuranceNet: 50 });
+    expect(reducer(g, { type: 'READY' })).toBe(g);
+  });
+  it('loses insurance without blackjack and reconciles a main-hand win', () => {
+    let g = reducer(deal('10', 'A', '9', '6'), { type: 'READY' });
+    g = reducer(reducer(g, { type: 'INSURE' }), { type: 'READY' });
+    expect(g.phase).toBe('player');
+    expect(g.balance).toBe(2425);
+    g = finish(g);
+    expect(g.balance).toBe(2525);
+    expect(g.stats.net).toBe(25);
+    expect(g.stats.insuranceNet).toBe(-25);
+  });
+  it.each(['6', 'K'])('insuring a player blackjack gives even-money net against Ace/%s', (hole) => {
+    let g = reducer(deal('A', 'A', 'K', hole), { type: 'READY' });
+    g = reducer(reducer(g, { type: 'INSURE' }), { type: 'READY' });
+    expect(g.balance).toBe(2550);
+    expect(g.stats.net).toBe(50);
+  });
+  it('permits declining when there are not enough credits for insurance', () => {
+    const g = { ...reducer(deal('9', 'A', '7', '6'), { type: 'READY' }), balance: 24 };
+    expect(reducer(g, { type: 'INSURE' })).toBe(g);
+    expect(reducer(g, { type: 'DECLINE_INSURANCE' }).phase).toBe('peeking');
+  });
+  it('surrenders only the original two-card hand and returns half, including fractional credits', () => {
+    let g = newGame([...cards('9', '10', '7', '8'), ...makeShoe()]);
+    g = reducer(g, { type: 'BET', amount: 25 });
+    g = reducer(reducer(reducer(g, { type: 'DEAL' }), { type: 'READY' }), { type: 'READY' });
+    expect(canSurrender(g)).toBe(true);
+    g = reducer(g, { type: 'SURRENDER' });
+    expect(g.phase).toBe('settled');
+    expect(g.balance).toBe(2487.5);
+    expect(g.dealer).toHaveLength(2);
+    expect(g.hands[0].result).toBe('surrender');
+    expect(g.stats).toMatchObject({ net: -12.5, losses: 1, surrenders: 1, pushes: 0 });
+    expect(reducer(g, { type: 'SURRENDER' })).toBe(g);
+  });
+  it('combines surrender and lost insurance without double deductions', () => {
+    let g = reducer(deal('9', 'A', '7', '6'), { type: 'READY' });
+    g = reducer(reducer(g, { type: 'INSURE' }), { type: 'READY' });
+    g = reducer(g, { type: 'SURRENDER' });
+    expect(g.balance).toBe(2450);
+    expect(g.stats.net).toBe(-50);
+    expect(g.history[0].insuranceNet).toBe(-25);
+  });
+  it('disallows surrender after hitting, splitting, doubling or dealer blackjack', () => {
+    const hit = reducer(reducer(ready('5', '8', '6', '9', '2'), { type: 'HIT' }), {
+      type: 'READY',
+    });
+    const split = reducer(reducer(ready('8', '8', '8', '9', '2', '3'), { type: 'SPLIT' }), {
+      type: 'READY',
+    });
+    const doubled = reducer(ready('5', '8', '6', '9', '2'), { type: 'DOUBLE' });
+    for (const g of [hit, split, doubled, ready('9', 'A', '7', 'K')]) {
+      expect(canSurrender(g)).toBe(false);
+      expect(reducer(g, { type: 'SURRENDER' })).toBe(g);
+    }
+  });
+  it('migrates old saved sessions and resumes insurance / peek without charging twice', () => {
+    const old = JSON.parse(JSON.stringify(finish(ready('10', '8', '9', '9'))));
+    delete old.insuranceBet;
+    delete old.stats.surrenders;
+    delete old.stats.insuranceNet;
+    delete old.stats.insuranceWagered;
+    old.history.forEach((r: any) => {
+      delete r.insuranceBet;
+      delete r.insuranceNet;
+    });
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(old) });
+    expect(loadGame()).toMatchObject({
+      balance: old.balance,
+      stats: { net: old.stats.net, surrenders: 0 },
+      insuranceBet: 0,
+    });
+    for (const insured of [false, true]) {
+      let g = reducer(deal('9', 'A', '7', 'K'), { type: 'READY' });
+      if (insured) g = reducer(g, { type: 'INSURE' });
+      vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(g) });
+      const restored = loadGame();
+      expect(restored).toEqual(g);
+      expect(finish(restored).balance).toBe(insured ? 2500 : 2450);
+    }
     vi.unstubAllGlobals();
   });
 });

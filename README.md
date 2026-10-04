@@ -6,19 +6,22 @@ A private-table atmosphere in your browser: full-bleed emerald felt, ivory cards
 
 ![Noir Club blackjack table](docs/table-preview.jpg)
 
-See the [mobile preview](docs/mobile-preview.jpg) and [verification report](docs/verification.md).
+See the [mobile preview](docs/mobile-preview.jpg) and [initial-release verification report](docs/verification.md). Current checks run in [GitHub Actions](https://github.com/FinDaHuman/noir-club-blackjack/actions).
 
 ## Play
 
 - Start with 2,500 credits. Select a chip or enter a wager of 10–500, in steps of 5.
 - Hit, stand, double, or split a same-rank pair. Blackjack pays 3:2; the dealer stands on all 17s.
-- One split per round, double after split allowed, split aces receive one card. Split 21 pays 1:1. No insurance or surrender.
+- One split per round, double after split allowed, split aces receive one card. Split 21 pays 1:1.
+- Insurance is offered against an Ace before the dealer peeks: a half-bet side wager paying 2:1 on dealer blackjack. A ten-value upcard also triggers a visible peek.
+- Late surrender returns half your original wager after blackjack has been ruled out, before hitting, doubling or splitting.
+- Open **Learn** for a current-hand adviser, an interactive situation explorer, and hard-total, soft-total and pair strategy charts. Guidance uses six-deck S17/DAS/late-surrender basic strategy, with fallbacks for unavailable actions; it does not count cards or guarantee wins.
 - Six decks shuffled with Web Crypto. Reshuffle between rounds below 80 cards.
 - Music and effects begin on interaction. Mute them independently from the top bar.
-- Keyboard: Space to deal, H to hit, S to stand, D to double, P to split. Shortcuts do not run while typing or when a dialog is open.
-- Open the player tracker for bankroll trends, win rate, streaks, blackjacks and the last 100 rounds. Export CSV or reset your session there.
+- Keyboard: Space to deal, H to hit, S to stand, D to double, P to split, R to surrender. Shortcuts do not run while typing or when a dialog is open.
+- Open the player tracker for bankroll trends, win rate, streaks, blackjacks, surrender counts, insurance results and the last 100 rounds. Insurance is included in round net and total wagered. Surrenders count as losses. Export CSV or reset your session there.
 
-The complete session, including an unfinished hand, persists in local storage on this browser and device. The game remains playable when storage is blocked, with a visible notice. Clearing browser storage clears progress. No account, backend, analytics, purchases, cash-out or real-money wagering.
+The complete session, including an unfinished hand, persists in local storage on this browser and device. New visits start with an empty table; completed hands stay in the tracker, while unfinished hands resume. Older saved balances and stats are preserved. The game remains playable when storage is blocked, with a visible notice. Clearing browser storage clears progress. No account, backend, analytics, purchases, cash-out or real-money wagering.
 
 ## Development
 
@@ -39,7 +42,7 @@ React + TypeScript + Vite. Rules and accounting live in `src/game.ts`; audio is 
 
 The felt is an independent background layer. Card motion stays on a raised rendering layer with visible overflow through every hand/stage ancestor. Cards enter from a nearby point above their resting place; the table is never a clipping plane. Hands fan adaptively to the available width. Reduced-motion settings disable movement. Short viewports scroll naturally rather than cutting off the table or controls.
 
-The test suite checks rules and accounting, runs 500-round bankroll invariants, and exercises Chromium and WebKit. Browser tests sample animation frames during dealing and splitting to detect cards crossing the viewport or the control band. Responsive checks cover widths from 320 to 1536 pixels, portrait and landscape. Browser emulation does not replace a physical-device check.
+The test suite checks rules and accounting, runs 500-round bankroll invariants, and exercises Chromium and WebKit. Browser tests sample card and face geometry during dealing, splitting, peeking and revealing to detect cards crossing the viewport or the control band. Responsive checks cover widths from 320 to 1536 pixels, portrait and landscape. Browser emulation does not replace a physical-device check.
 
 ## GitHub Pages
 

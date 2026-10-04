@@ -29,7 +29,7 @@ async function monitorCards(page: Page) {
     const measure = () => {
       samples++;
       const footer = document.querySelector('.control-deck')!.getBoundingClientRect();
-      document.querySelectorAll<HTMLElement>('.playing-card').forEach((card) => {
+      document.querySelectorAll<HTMLElement>('.playing-card, .card-flipper').forEach((card) => {
         const r = card.getBoundingClientRect();
         if (r.left < -1 || r.right > innerWidth + 1 || r.bottom > footer.top + 1)
           failures.push(
@@ -285,3 +285,104 @@ for (const [width, height] of [
     });
   });
 }
+
+test('opening is empty, totals use legible numerals, and completed cards clear on reopen', async ({
+  page,
+}) => {
+  await seed(page, ['9', '10', '7', '8']);
+  await expect(page.locator('.playing-card')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'peeking');
+  await expect(page.locator('.is-peeking')).toHaveCount(1);
+  await expect(page.locator('.dealer-hand .card-back')).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Surrender', exact: true })).toBeEnabled();
+  expect(
+    await page.locator('.player-hand .score').evaluate((el) => getComputedStyle(el).fontFamily),
+  ).toContain('DM Sans');
+  await page.getByRole('button', { name: 'Surrender', exact: true }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+  expect((await saved(page)).balance).toBe(2475);
+  const reopened = await page.context().newPage();
+  await reopened.goto('/');
+  await expect(reopened.locator('.app')).toHaveAttribute('data-phase', 'betting');
+  await expect(reopened.locator('.playing-card')).toHaveCount(0);
+  expect((await saved(reopened)).history[0].results).toEqual(['surrender']);
+  await reopened.close();
+});
+
+test('Ace insurance precedes a visible safe peek and settles a dealer blackjack', async ({
+  page,
+}) => {
+  await seed(page, ['9', 'A', '7', 'K']);
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'insurance');
+  await expect(page.locator('.is-peeking')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Insure · 25', exact: true })).toBeEnabled();
+  await monitorCards(page);
+  await page.getByRole('button', { name: 'Insure · 25', exact: true }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'peeking');
+  await expect(page.locator('.is-peeking')).toHaveCount(1);
+  await expect(page.locator('.dealer-hand .card-back')).toHaveCount(1);
+  expect(
+    await page.locator('.is-peeking').evaluate((el) => getComputedStyle(el).animationName),
+  ).toBe('dealer-peek');
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+  await assertMotion(page);
+  await expect(page.locator('.dealer-hand .card-face')).toHaveCount(2);
+  expect(await saved(page)).toMatchObject({ balance: 2500, stats: { insuranceNet: 50, net: 0 } });
+  await tracker(page);
+  await expect(page.getByText('Insurance +50', { exact: true })).toBeVisible();
+});
+
+test('declined insurance persists across reopening and surrender stays unavailable after a hit', async ({
+  page,
+}) => {
+  await seed(page, ['5', 'A', '6', '6', '2']);
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'insurance');
+  const reopened = await page.context().newPage();
+  await reopened.goto('/');
+  await expect(reopened.locator('.app')).toHaveAttribute('data-phase', 'insurance');
+  await reopened.getByRole('button', { name: 'No insurance', exact: true }).click();
+  await expect(reopened.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
+  await reopened.getByRole('button', { name: 'Hit', exact: true }).click();
+  await expect(reopened.getByRole('button', { name: 'Stand', exact: true })).toBeEnabled();
+  await expect(reopened.getByRole('button', { name: 'Surrender', exact: true })).toBeDisabled();
+  expect((await saved(reopened)).insuranceBet).toBe(0);
+  await reopened.close();
+});
+
+test('strategy room explores all charts, fallback actions and the live hand without console errors', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await seed(page, ['8', '10', '8', '7']);
+  await page.getByRole('button', { name: 'Learn basic strategy' }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect(page.locator('.strategy-answer h3')).toHaveText('Surrender');
+  await page.getByRole('combobox', { name: 'Hand stage', exact: true }).selectOption('hit');
+  await expect(page.locator('.strategy-answer h3')).toHaveText('Hit');
+  await page.getByRole('button', { name: 'Soft totals', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Hand stage', exact: true }).selectOption('original');
+  await page.getByRole('combobox', { name: 'Dealer upcard', exact: true }).selectOption('6');
+  await expect(page.locator('.strategy-answer h3')).toHaveText('Double');
+  await page.getByLabel('Credits for double / split').uncheck();
+  await expect(page.locator('.strategy-answer h3')).toHaveText('Stand');
+  await page.getByRole('button', { name: 'Pairs', exact: true }).click();
+  await page.getByLabel('Credits for double / split').check();
+  await page.getByRole('combobox', { name: 'Dealer upcard', exact: true }).selectOption('10');
+  await expect(page.locator('.strategy-answer h3')).toHaveText('Split');
+  await page.getByRole('button', { name: 'pair 9, 9 versus 7: Stand', exact: true }).click();
+  await expect(page.locator('.strategy-answer h3')).toHaveText('Stand');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.getByRole('dialog').evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+  ).toBe(true);
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(page.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Learn basic strategy' }).click();
+  await expect(page.locator('.live-advice h3')).toHaveText('Split');
+  expect(errors).toEqual([]);
+});

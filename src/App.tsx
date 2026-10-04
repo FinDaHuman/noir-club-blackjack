@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { BarChart3, Expand, Minimize, Music2, Volume2, VolumeX, Spade } from 'lucide-react';
+import {
+  BarChart3,
+  BookOpen,
+  Expand,
+  Minimize,
+  Music2,
+  Volume2,
+  VolumeX,
+  Spade,
+} from 'lucide-react';
 import { audio } from './audio';
-import { canBet, loadGame, reducer, SAVE_KEY, signed, type Action, type Card } from './game';
+import { canBet, loadGame, reducer, SAVE_KEY, signed, type Action } from './game';
 import { Hand } from './components/Cards';
 import { Controls } from './components/Controls';
 import { Dialog, Rules, Session, Tracker } from './components/Tracker';
+import { Strategy } from './components/Strategy';
 
-const previewPlayer: Card[] = [
-  { id: 'preview-10', rank: '10', suit: 'spades' },
-  { id: 'preview-7', rank: '7', suit: 'diamonds' },
-];
-const previewDealer: Card[] = [
-  { id: 'preview-a', rank: 'A', suit: 'spades' },
-  { id: 'preview-k', rank: 'K', suit: 'clubs' },
-];
 function readPrefs() {
   try {
     return JSON.parse(localStorage.getItem('noir-club.audio') || '{}');
@@ -23,7 +25,7 @@ function readPrefs() {
 }
 export default function App() {
   const [game, dispatch] = useReducer(reducer, undefined, loadGame);
-  const [modal, setModal] = useState<'rules' | 'tracker' | 'reset' | null>(null);
+  const [modal, setModal] = useState<'rules' | 'strategy' | 'tracker' | 'reset' | null>(null);
   const [effects, setEffects] = useState(() => readPrefs().effects !== false);
   const [music, setMusic] = useState(() => readPrefs().music !== false);
   const [fullscreen, setFullscreen] = useState(false);
@@ -68,6 +70,7 @@ export default function App() {
   useEffect(() => {
     const delays: Record<string, number> = {
       dealing: 1200,
+      peeking: 1100,
       hitting: 500,
       splitting: 650,
       dealer: 850,
@@ -84,7 +87,7 @@ export default function App() {
     const timers: ReturnType<typeof setTimeout>[] = [];
     if (game.phase === 'dealing')
       [0, 200, 400, 600].forEach((ms) => timers.push(setTimeout(() => audio.play('card'), ms)));
-    else if (['hitting', 'splitting', 'dealer'].includes(game.phase)) audio.play('card');
+    else if (['hitting', 'splitting', 'dealer', 'peeking'].includes(game.phase)) audio.play('card');
     else if (game.phase === 'settled') {
       const net = game.history[0]?.net ?? 0;
       audio.play(net > 0 ? 'win' : net < 0 ? 'loss' : 'push');
@@ -103,9 +106,9 @@ export default function App() {
       )
         return;
       if (e.key === ' ' && e.target instanceof Element && e.target.closest('button,a')) return;
-      const type = ({ ' ': 'DEAL', h: 'HIT', s: 'STAND', d: 'DOUBLE', p: 'SPLIT' } as const)[
-        e.key.toLowerCase() as ' '
-      ];
+      const type = (
+        { ' ': 'DEAL', h: 'HIT', s: 'STAND', d: 'DOUBLE', p: 'SPLIT', r: 'SURRENDER' } as const
+      )[e.key.toLowerCase() as ' '];
       if (type) {
         e.preventDefault();
         act({ type });
@@ -150,6 +153,14 @@ export default function App() {
           </div>
         </a>
         <nav aria-label="Table settings">
+          <button
+            className="learn-button"
+            aria-label="Learn basic strategy"
+            onClick={() => setModal('strategy')}
+          >
+            <BookOpen size={17} />
+            <span>Learn</span>
+          </button>
           <button className="rules-button" onClick={() => setModal('rules')}>
             Rules
           </button>
@@ -202,24 +213,25 @@ export default function App() {
       >
         <div className="dealer-area">
           <Hand
-            cards={preview ? previewDealer : game.dealer}
+            cards={game.dealer}
             label="Dealer"
             hidden={dealerHidden}
             dealer
             dealing={game.phase === 'dealing'}
             preview={preview}
+            peeking={game.phase === 'peeking'}
           />
         </div>
         <svg
           className="table-lettering"
-          viewBox="0 0 900 210"
+          viewBox="0 0 900 240"
           aria-label="Blackjack pays 3 to 2. Dealer stands on all 17."
         >
           <defs>
             <path id="letter-arc" d="M95 50 Q450 235 805 50" />
             <path id="rule-arc" d="M145 108 Q450 262 755 108" />
           </defs>
-          <path className="table-line" d="M45 28 Q450 340 855 28" />
+          <path className="table-line" d="M65 106 Q450 354 835 106" />
           <text className="table-title">
             <textPath href="#letter-arc" startOffset="50%" textAnchor="middle">
               BLACKJACK PAYS 3 TO 2
@@ -233,7 +245,13 @@ export default function App() {
         </svg>
         <div className="players-area">
           {preview ? (
-            <Hand cards={previewPlayer} label="Your seat" preview />
+            <div className="empty-seat">
+              <Spade size={30} strokeWidth={1} />
+              <span>Your seat awaits</span>
+              <button className="text-button" onClick={() => setModal('strategy')}>
+                New to blackjack? Learn to play
+              </button>
+            </div>
           ) : (
             game.hands.map((hand, i) => (
               <Hand
@@ -266,6 +284,7 @@ export default function App() {
       </main>
       <Controls game={game} act={act} reset={() => setModal('reset')} />
       {modal === 'rules' && <Rules close={() => setModal(null)} />}
+      {modal === 'strategy' && <Strategy game={game} close={() => setModal(null)} />}
       {modal === 'tracker' && (
         <Tracker game={game} close={() => setModal(null)} reset={() => setModal('reset')} />
       )}

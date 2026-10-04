@@ -122,11 +122,13 @@ export function PlayingCard({
   hidden,
   delay = 0,
   animate = true,
+  peeking = false,
 }: {
   card: Card;
   hidden?: boolean;
   delay?: number;
   animate?: boolean;
+  peeking?: boolean;
 }) {
   const [showBack, setShowBack] = useState(Boolean(hidden));
   const [flipping, setFlipping] = useState(false);
@@ -154,7 +156,9 @@ export function PlayingCard({
       role="img"
       aria-label={hidden ? 'Face-down card' : `${card.rank} of ${card.suit}`}
     >
-      <div className={`card-flipper ${flipping ? 'is-flipping' : ''}`}>
+      <div
+        className={`card-flipper ${flipping ? 'is-flipping' : ''} ${peeking ? 'is-peeking' : ''}`}
+      >
         {showBack ? <div className="card-back" /> : <Face card={card} />}
       </div>
     </div>
@@ -169,6 +173,7 @@ export function Hand({
   dealing = false,
   dealer = false,
   preview = false,
+  peeking = false,
 }: {
   cards: Card[];
   label: string;
@@ -178,6 +183,7 @@ export function Hand({
   dealing?: boolean;
   dealer?: boolean;
   preview?: boolean;
+  peeking?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(300);
@@ -200,7 +206,7 @@ export function Hand({
           <span>{label}</span>
           <b className="score">
             {total.total || '—'}
-            {hidden ? ' + ?' : ''}
+            {hidden && cards.length > 0 ? ' + ?' : ''}
           </b>
         </div>
       )}
@@ -222,6 +228,7 @@ export function Hand({
             <PlayingCard
               card={card}
               hidden={hidden && i === 1}
+              peeking={peeking && i === 1}
               delay={dealing ? (i * 2 + (dealer ? 1 : 0)) * 200 : 0}
               animate={!preview}
             />

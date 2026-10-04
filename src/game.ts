@@ -1,6 +1,6 @@
 export type Suit = 'spades' | 'hearts' | 'diamonds' | 'clubs';
 export type Card = { id: string; rank: string; suit: Suit };
-export type Result = 'blackjack' | 'win' | 'loss' | 'push';
+export type Result = 'blackjack' | 'win' | 'loss' | 'push' | 'surrender';
 export type Hand = { cards: Card[]; bet: number; stood: boolean; split: boolean; result?: Result };
 export type Round = {
   id: number;
@@ -11,6 +11,8 @@ export type Round = {
   net: number;
   balance: number;
   results: Result[];
+  insuranceBet: number;
+  insuranceNet: number;
 };
 export type Stats = {
   rounds: number;
@@ -24,23 +26,49 @@ export type Stats = {
   bestWin: number;
   streak: number;
   bestStreak: number;
+  surrenders: number;
+  insuranceWagered: number;
+  insuranceNet: number;
 };
 export type Game = {
   version: 1;
-  phase: 'betting' | 'dealing' | 'player' | 'hitting' | 'splitting' | 'dealer' | 'settled';
+  phase:
+    | 'betting'
+    | 'dealing'
+    | 'insurance'
+    | 'peeking'
+    | 'player'
+    | 'hitting'
+    | 'splitting'
+    | 'dealer'
+    | 'settled';
   balance: number;
   bet: number;
   shoe: Card[];
   dealer: Card[];
   hands: Hand[];
   active: number;
+  insuranceBet: number;
   stats: Stats;
   history: Round[];
   message: string;
 };
 export type Action =
   | { type: 'BET'; amount: number }
-  | { type: 'DEAL' | 'READY' | 'HIT' | 'STAND' | 'DOUBLE' | 'SPLIT' | 'DEALER_TICK' | 'RESET' };
+  | {
+      type:
+        | 'DEAL'
+        | 'READY'
+        | 'HIT'
+        | 'STAND'
+        | 'DOUBLE'
+        | 'SPLIT'
+        | 'INSURE'
+        | 'DECLINE_INSURANCE'
+        | 'SURRENDER'
+        | 'DEALER_TICK'
+        | 'RESET';
+    };
 
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 export const SUITS: Record<Suit, string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
@@ -80,6 +108,7 @@ export function newGame(shoe = makeShoe()): Game {
     dealer: [],
     hands: [],
     active: 0,
+    insuranceBet: 0,
     stats: {
       rounds: 0,
       hands: 0,
@@ -92,12 +121,20 @@ export function newGame(shoe = makeShoe()): Game {
       bestWin: 0,
       streak: 0,
       bestStreak: 0,
+      surrenders: 0,
+      insuranceWagered: 0,
+      insuranceNet: 0,
     },
     history: [],
     message: 'A seat just for you.',
   };
 }
 export const canBet = (g: Game) => g.phase === 'betting' || g.phase === 'settled';
+export const canSurrender = (g: Game) =>
+  g.phase === 'player' &&
+  g.hands.length === 1 &&
+  !g.hands[0].split &&
+  g.hands[0].cards.length === 2;
 export const canDouble = (g: Game) =>
   g.phase === 'player' &&
   g.hands[g.active]?.cards.length === 2 &&
@@ -128,40 +165,47 @@ function nextHand(g: Game) {
 function settle(g: Game) {
   const dealerTotal = score(g.dealer).total;
   const dealerNatural = natural(g.dealer);
-  let returned = 0;
-  let wager = 0;
+  // Hold the side-bet payout until settlement so bankroll and round net reconcile once.
+  const insuranceReturn = dealerNatural ? g.insuranceBet * 3 : 0;
+  const insuranceNet = insuranceReturn - g.insuranceBet;
+  let returned = insuranceReturn;
+  let wager = g.insuranceBet;
   for (const hand of g.hands) {
     const total = score(hand.cards).total;
     const blackjack = !hand.split && natural(hand.cards);
     hand.result =
-      total > 21
-        ? 'loss'
-        : blackjack && dealerNatural
-          ? 'push'
-          : dealerNatural
-            ? 'loss'
-            : blackjack
-              ? 'blackjack'
-              : dealerTotal > 21 || total > dealerTotal
-                ? 'win'
-                : total === dealerTotal
-                  ? 'push'
-                  : 'loss';
+      hand.result === 'surrender'
+        ? 'surrender'
+        : total > 21
+          ? 'loss'
+          : blackjack && dealerNatural
+            ? 'push'
+            : dealerNatural
+              ? 'loss'
+              : blackjack
+                ? 'blackjack'
+                : dealerTotal > 21 || total > dealerTotal
+                  ? 'win'
+                  : total === dealerTotal
+                    ? 'push'
+                    : 'loss';
     const payout =
-      hand.result === 'blackjack'
-        ? hand.bet * 2.5
-        : hand.result === 'win'
-          ? hand.bet * 2
-          : hand.result === 'push'
-            ? hand.bet
-            : 0;
+      hand.result === 'surrender'
+        ? hand.bet / 2
+        : hand.result === 'blackjack'
+          ? hand.bet * 2.5
+          : hand.result === 'win'
+            ? hand.bet * 2
+            : hand.result === 'push'
+              ? hand.bet
+              : 0;
     returned += payout;
     wager += hand.bet;
     g.stats.hands++;
     if (hand.result === 'win' || hand.result === 'blackjack') {
       g.stats.wins++;
       g.stats.streak = Math.max(0, g.stats.streak) + 1;
-    } else if (hand.result === 'loss') {
+    } else if (hand.result === 'loss' || hand.result === 'surrender') {
       g.stats.losses++;
       g.stats.streak = Math.min(0, g.stats.streak) - 1;
     } else {
@@ -169,6 +213,7 @@ function settle(g: Game) {
       g.stats.streak = 0;
     }
     if (hand.result === 'blackjack') g.stats.blackjacks++;
+    if (hand.result === 'surrender') g.stats.surrenders++;
     g.stats.bestStreak = Math.max(g.stats.bestStreak, g.stats.streak);
   }
   const net = returned - wager;
@@ -177,6 +222,8 @@ function settle(g: Game) {
   g.stats.wagered += wager;
   g.stats.net += net;
   g.stats.bestWin = Math.max(g.stats.bestWin, net);
+  g.stats.insuranceWagered += g.insuranceBet;
+  g.stats.insuranceNet += insuranceNet;
   g.history = [
     {
       id: g.stats.rounds,
@@ -187,20 +234,26 @@ function settle(g: Game) {
       net,
       balance: g.balance,
       results: g.hands.map((h) => h.result!),
+      insuranceBet: g.insuranceBet,
+      insuranceNet,
     },
     ...g.history,
   ].slice(0, 100);
   g.phase = 'settled';
   g.message =
-    g.hands.length === 1 && g.hands[0].result === 'blackjack'
-      ? 'Blackjack. Beautifully played.'
-      : net > 0
-        ? 'The table is yours.'
-        : net === 0
-          ? 'A push. All square.'
-          : g.hands.every((h) => score(h.cards).total > 21)
-            ? 'Busted. A fresh hand awaits.'
-            : 'This one goes to the house.';
+    g.hands[0].result === 'surrender'
+      ? 'Surrendered. Half your wager returned.'
+      : dealerNatural && g.insuranceBet > 0
+        ? 'Dealer blackjack. Insurance pays 2:1.'
+        : g.hands.length === 1 && g.hands[0].result === 'blackjack'
+          ? 'Blackjack. Beautifully played.'
+          : net > 0
+            ? 'The table is yours.'
+            : net === 0
+              ? 'A push. All square.'
+              : g.hands.every((h) => score(h.cards).total > 21)
+                ? 'Busted. A fresh hand awaits.'
+                : 'This one goes to the house.';
   if (g.balance >= 10 && g.bet > g.balance) g.bet = Math.min(500, Math.floor(g.balance / 5) * 5);
   return g;
 }
@@ -225,6 +278,7 @@ export function reducer(state: Game, action: Action): Game {
       hands: [],
       dealer: [],
       active: 0,
+      insuranceBet: 0,
       phase: 'dealing',
       message: 'A little anticipation…',
     };
@@ -243,11 +297,42 @@ export function reducer(state: Game, action: Action): Game {
     stats: { ...state.stats },
   };
   const h = g.hands[g.active];
+  if (
+    g.phase === 'insurance' &&
+    (action.type === 'INSURE' || action.type === 'DECLINE_INSURANCE')
+  ) {
+    if (action.type === 'INSURE') {
+      if (g.balance < h.bet / 2) return state;
+      g.insuranceBet = h.bet / 2;
+      g.balance -= g.insuranceBet;
+    }
+    g.phase = 'peeking';
+    g.message = 'Checking for blackjack…';
+    return g;
+  }
   if (action.type === 'READY') {
     if (g.phase === 'dealing') {
-      if (natural(g.dealer) || natural(h.cards)) return settle(g);
+      if (g.dealer[0].rank === 'A') {
+        g.phase = 'insurance';
+        g.message = 'Dealer shows an Ace. Insurance?';
+        return g;
+      }
+      if (value(g.dealer[0]) === 10) {
+        g.phase = 'peeking';
+        g.message = 'Checking for blackjack…';
+        return g;
+      }
+      if (natural(h.cards)) return settle(g);
       g.phase = 'player';
       g.message = 'Your move. Trust your hand.';
+      return g;
+    }
+    if (g.phase === 'peeking') {
+      if (natural(g.dealer) || natural(h.cards)) return settle(g);
+      g.phase = 'player';
+      g.message = g.insuranceBet
+        ? 'No blackjack. Insurance lost. Your move.'
+        : 'No blackjack. Your move.';
       return g;
     }
     if (g.phase === 'hitting' || g.phase === 'splitting') {
@@ -268,6 +353,11 @@ export function reducer(state: Game, action: Action): Game {
     return settle(g);
   }
   if (g.phase !== 'player' || !h) return state;
+  if (action.type === 'SURRENDER' && canSurrender(g)) {
+    h.result = 'surrender';
+    h.stood = true;
+    return settle(g);
+  }
   if (action.type === 'STAND') {
     h.stood = true;
     return nextHand(g);
@@ -313,9 +403,17 @@ export function loadGame(): Game {
       Number.isFinite(raw.bet) &&
       raw.bet >= 10 &&
       raw.bet <= 500 &&
-      ['betting', 'dealing', 'player', 'hitting', 'splitting', 'dealer', 'settled'].includes(
-        raw.phase,
-      ) &&
+      [
+        'betting',
+        'dealing',
+        'insurance',
+        'peeking',
+        'player',
+        'hitting',
+        'splitting',
+        'dealer',
+        'settled',
+      ].includes(raw.phase) &&
       Array.isArray(raw.shoe) &&
       raw.shoe.every(isCard) &&
       Array.isArray(raw.dealer) &&
@@ -337,8 +435,39 @@ export function loadGame(): Game {
           Number.isFinite(r.balance) &&
           Number.isFinite(r.net),
       )
-    )
-      return raw;
+    ) {
+      if (
+        raw.insuranceBet !== undefined &&
+        (!Number.isFinite(raw.insuranceBet) || raw.insuranceBet < 0)
+      )
+        return newGame();
+      // Upgrade existing v1 sessions without losing balances or hand history.
+      return {
+        ...raw,
+        insuranceBet: raw.insuranceBet ?? 0,
+        stats: {
+          ...raw.stats,
+          surrenders: raw.stats.surrenders ?? 0,
+          insuranceWagered: raw.stats.insuranceWagered ?? 0,
+          insuranceNet: raw.stats.insuranceNet ?? 0,
+        },
+        history: raw.history.map((round) => ({
+          ...round,
+          insuranceBet: round.insuranceBet ?? 0,
+          insuranceNet: round.insuranceNet ?? 0,
+        })),
+        // A completed round belongs in the tracker, not on a newly opened table.
+        ...(raw.phase === 'settled'
+          ? {
+              phase: 'betting' as const,
+              dealer: [],
+              hands: [],
+              insuranceBet: 0,
+              message: 'Welcome back. Your seat awaits.',
+            }
+          : {}),
+      };
+    }
   } catch {
     /* Unavailable or corrupted local storage starts a playable session. */
   }
