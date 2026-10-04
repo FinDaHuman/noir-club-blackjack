@@ -1,45 +1,43 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
-  BarChart3,
-  BookOpen,
-  Expand,
-  Minimize,
-  Music2,
-  Volume2,
-  VolumeX,
-  Spade,
-} from 'lucide-react';
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useReducer,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
+import { BarChart3, BookOpen, Expand, Minimize, Settings2, CircleHelp, Spade } from 'lucide-react';
 import { audio } from './audio';
 import { canBet, loadGame, reducer, SAVE_KEY, signed, type Action } from './game';
 import { Hand } from './components/Cards';
 import { Controls } from './components/Controls';
 import { Dialog, Rules, Session, Tracker } from './components/Tracker';
 import { Strategy } from './components/Strategy';
+import { Settings } from './components/Settings';
+import { loadSettings, SETTINGS_KEY, SHORTCUTS, SPEED_FACTOR } from './settings';
 
-function readPrefs() {
-  try {
-    const prefs = JSON.parse(localStorage.getItem('noir-club.audio') || '{}');
-    return prefs && typeof prefs === 'object' ? prefs : {};
-  } catch {
-    return {};
-  }
-}
 export default function App() {
   const [game, dispatch] = useReducer(reducer, undefined, loadGame);
-  const [modal, setModal] = useState<'rules' | 'strategy' | 'tracker' | 'reset' | null>(null);
-  const [effects, setEffects] = useState(() => readPrefs().effects !== false);
-  const [music, setMusic] = useState(() => readPrefs().music !== false);
+  const [modal, setModal] = useState<
+    'rules' | 'strategy' | 'tracker' | 'reset' | 'settings' | null
+  >(null);
+  const [settings, setSettings] = useState(loadSettings);
   const [fullscreen, setFullscreen] = useState(false);
   const [notice, setNotice] = useState('');
-  const [audioStarted, setAudioStarted] = useState(false);
+  const [systemReducedMotion, setSystemReducedMotion] = useState(
+    () => matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
+  const tableRef = useRef<HTMLElement>(null);
+  const speed = SPEED_FACTOR[settings.speed];
+  const reducedMotion = settings.reducedMotion || systemReducedMotion;
   const storageWarned = useRef(false);
   const preview = game.phase === 'betting';
   const dealerHidden = !['dealer', 'settled'].includes(game.phase);
   const unlock = useCallback(() => {
     void audio.unlock().then((ok) => {
-      if (ok) setAudioStarted(true);
-      else setNotice('Audio is unavailable in this browser. You can still play.');
+      if (!ok) setNotice('Audio is unavailable in this browser. You can still play.');
     });
   }, []);
   const act = useCallback(
@@ -51,14 +49,29 @@ export default function App() {
     [unlock],
   );
   useEffect(() => {
-    audio.effects = effects;
-    audio.setMusic(music);
+    audio.configure(settings);
     try {
-      localStorage.setItem('noir-club.audio', JSON.stringify({ effects, music }));
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     } catch {
       /* Playback still works without storage. */
     }
-  }, [effects, music]);
+  }, [settings]);
+  useEffect(() => {
+    const media = matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setSystemReducedMotion(media.matches);
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  useLayoutEffect(() => {
+    const table = tableRef.current;
+    if (!table) return;
+    // Size cards from the actual space left by the header and controls, including safe areas.
+    const observer = new ResizeObserver(([entry]) => {
+      table.style.setProperty('--stage-height', `${entry.contentRect.height}px`);
+    });
+    observer.observe(table);
+    return () => observer.disconnect();
+  }, []);
   useEffect(() => {
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(game));
@@ -83,14 +96,16 @@ export default function App() {
     if (!delay) return;
     const timer = setTimeout(
       () => dispatch({ type: game.phase === 'dealer' ? 'DEALER_TICK' : 'READY' }),
-      delay,
+      delay * speed,
     );
     return () => clearTimeout(timer);
-  }, [game.phase, game.dealer.length, game.active, modal, pageVisible]);
+  }, [game.phase, game.dealer.length, game.active, modal, pageVisible, speed]);
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
     if (game.phase === 'dealing')
-      [0, 200, 400, 600].forEach((ms) => timers.push(setTimeout(() => audio.play('card'), ms)));
+      [0, 200, 400, 600].forEach((ms) =>
+        timers.push(setTimeout(() => audio.play('card'), ms * speed)),
+      );
     else if (['hitting', 'splitting', 'split-dealing', 'dealer', 'peeking'].includes(game.phase))
       audio.play('card');
     else if (game.phase === 'settled') {
@@ -98,22 +113,23 @@ export default function App() {
       audio.play(net > 0 ? 'win' : net < 0 ? 'loss' : 'push');
     }
     return () => timers.forEach(clearTimeout);
-  }, [game.phase, game.dealer.length, game.active]);
+  }, [game.phase, game.dealer.length, game.active, speed]);
   useEffect(() => {
     const keydown = (e: KeyboardEvent) => {
       if (
         modal ||
+        !settings.hotkeys ||
+        e.isComposing ||
         e.repeat ||
         e.ctrlKey ||
         e.metaKey ||
         e.altKey ||
-        (e.target instanceof Element && e.target.closest('input,select,textarea'))
+        (e.target instanceof Element &&
+          e.target.closest('input,select,textarea,[contenteditable="true"]'))
       )
         return;
       if (e.key === ' ' && e.target instanceof Element && e.target.closest('button,a')) return;
-      const type = (
-        { ' ': 'DEAL', h: 'HIT', s: 'STAND', d: 'DOUBLE', p: 'SPLIT', r: 'SURRENDER' } as const
-      )[e.key.toLowerCase() as ' '];
+      const type = SHORTCUTS.find(([action]) => settings.keys[action] === e.key.toLowerCase())?.[0];
       if (type) {
         e.preventDefault();
         act({ type });
@@ -121,7 +137,7 @@ export default function App() {
     };
     window.addEventListener('keydown', keydown);
     return () => window.removeEventListener('keydown', keydown);
-  }, [act, modal]);
+  }, [act, modal, settings.hotkeys, settings.keys]);
   useEffect(() => {
     const fn = () => {
       audio.visibility(document.hidden);
@@ -150,7 +166,18 @@ export default function App() {
       setNotice('The table fills your browser. Add it to your Home Screen for an immersive view.');
   };
   return (
-    <div className="app" data-phase={game.phase}>
+    <div
+      className={`app ${reducedMotion ? 'reduce-motion' : ''} ${settings.hotkeys && settings.showHints ? 'show-hotkeys' : ''}`}
+      data-phase={game.phase}
+      style={
+        {
+          '--deal-duration': `${480 * speed}ms`,
+          '--reveal-duration': `${520 * speed}ms`,
+          '--peek-duration': `${1050 * speed}ms`,
+          '--move-duration': `${350 * speed}ms`,
+        } as CSSProperties
+      }
+    >
       <div className="felt" aria-hidden="true" />
       <header className="topbar">
         <a className="brand" href="./" aria-label="Noir Club Blackjack home">
@@ -169,34 +196,18 @@ export default function App() {
             <BookOpen size={17} />
             <span>Learn</span>
           </button>
-          <button className="rules-button" onClick={() => setModal('rules')}>
-            Rules
+          <button className="rules-button" aria-label="Rules" onClick={() => setModal('rules')}>
+            <CircleHelp size={18} />
+            <span>Rules</span>
           </button>
           <span className="nav-divider" />
           <button
             className="icon-button"
-            aria-label={effects ? 'Mute sound effects' : 'Enable sound effects'}
-            aria-pressed={effects}
-            title="Sound effects"
-            onClick={() => {
-              unlock();
-              setEffects(!effects);
-            }}
+            aria-label="Open settings"
+            title="Settings"
+            onClick={() => setModal('settings')}
           >
-            {effects ? <Volume2 /> : <VolumeX />}
-          </button>
-          <button
-            className={`icon-button music-button ${!music ? 'muted' : ''}`}
-            aria-label={music ? 'Mute background music' : 'Enable background music'}
-            aria-pressed={music}
-            title="Lounge music"
-            onClick={() => {
-              unlock();
-              setMusic(!music);
-            }}
-          >
-            <Music2 />
-            {music && audioStarted && <i className="music-indicator" />}
+            <Settings2 />
           </button>
           <button
             className="icon-button mobile-tracker"
@@ -216,6 +227,7 @@ export default function App() {
         </nav>
       </header>
       <main
+        ref={tableRef}
         className={`table ${game.hands.length > 1 ? 'is-split' : ''}`}
         aria-label="Blackjack table"
       >
@@ -228,6 +240,8 @@ export default function App() {
             dealing={game.phase === 'dealing'}
             preview={preview}
             peeking={game.phase === 'peeking'}
+            speed={speed}
+            reducedMotion={reducedMotion}
           />
         </div>
         <svg
@@ -273,6 +287,8 @@ export default function App() {
                 oneCardOnly={hand.split && hand.cards[0].rank === 'A'}
                 result={hand.result}
                 dealing={game.phase === 'dealing'}
+                speed={speed}
+                reducedMotion={reducedMotion}
               />
             ))
           )}
@@ -294,8 +310,24 @@ export default function App() {
           SIX DECKS <span>·</span> YOUR PRIVATE TABLE
         </div>
       </main>
-      <Controls game={game} act={act} reset={() => setModal('reset')} />
-      {modal === 'rules' && <Rules close={() => setModal(null)} />}
+      <Controls game={game} act={act} reset={() => setModal('reset')} settings={settings} />
+      {modal === 'rules' && <Rules close={() => setModal(null)} settings={settings} />}
+      {modal === 'settings' && (
+        <Settings
+          settings={settings}
+          change={(next) => {
+            audio.configure(next);
+            setSettings(next);
+            unlock();
+          }}
+          close={() => setModal(null)}
+          previewSound={() => {
+            void audio.unlock().then((ok) => {
+              if (ok) audio.play('chip');
+            });
+          }}
+        />
+      )}
       {modal === 'strategy' && <Strategy game={game} close={() => setModal(null)} />}
       {modal === 'tracker' && (
         <Tracker game={game} close={() => setModal(null)} reset={() => setModal('reset')} />

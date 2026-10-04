@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Coins, Minus, Plus, RotateCcw, ArrowUpRight } from 'lucide-react';
+import { keyLabel, type Settings, type ShortcutAction } from '../settings';
 import {
   canBet,
   canDouble,
@@ -13,11 +14,22 @@ export function Controls({
   game,
   act,
   reset,
+  settings,
 }: {
   game: Game;
   act: (action: Action) => void;
   reset: () => void;
+  settings: Settings;
 }) {
+  const shortcut = (action: ShortcutAction) =>
+    settings.hotkeys
+      ? settings.keys[action] === ' '
+        ? 'Space'
+        : settings.keys[action].toUpperCase()
+      : undefined;
+  const hint = (action: ShortcutAction) => (
+    <kbd aria-hidden="true">{keyLabel(settings.keys[action])}</kbd>
+  );
   const betting = canBet(game);
   const playing = game.phase === 'player';
   const broke = game.balance < 10 && betting;
@@ -109,6 +121,10 @@ export function Controls({
         {betting ? (
           <button
             className="primary deal-button"
+            aria-label={
+              broke ? 'Start fresh' : game.phase === 'settled' ? 'Deal again' : 'Deal me in'
+            }
+            aria-keyshortcuts={!broke ? shortcut('DEAL') : undefined}
             disabled={!broke && game.balance < game.bet}
             onClick={() => (broke ? reset() : act({ type: 'DEAL' }))}
           >
@@ -119,6 +135,7 @@ export function Controls({
             ) : (
               <>
                 {game.phase === 'settled' ? 'Deal again' : 'Deal me in'}
+                {hint('DEAL')}
                 <ArrowUpRight size={19} />
               </>
             )}
@@ -138,36 +155,50 @@ export function Controls({
           </>
         ) : (
           <>
-            <button className="primary" disabled={!playing} onClick={() => act({ type: 'HIT' })}>
-              Hit <kbd>H</kbd>
+            <button
+              className="primary"
+              aria-label="Hit"
+              aria-keyshortcuts={shortcut('HIT')}
+              disabled={!playing}
+              onClick={() => act({ type: 'HIT' })}
+            >
+              Hit {hint('HIT')}
             </button>
             <button
               className="secondary"
+              aria-label="Stand"
+              aria-keyshortcuts={shortcut('STAND')}
               disabled={!playing}
               onClick={() => act({ type: 'STAND' })}
             >
-              Stand <kbd>S</kbd>
+              Stand {hint('STAND')}
             </button>
             <button
               className="secondary"
               disabled={!canDouble(game)}
+              aria-label="Double"
+              aria-keyshortcuts={shortcut('DOUBLE')}
               onClick={() => act({ type: 'DOUBLE' })}
             >
-              Double <kbd>D</kbd>
+              Double {hint('DOUBLE')}
             </button>
             <button
               className="secondary"
               disabled={!canSplit(game)}
+              aria-label="Split"
+              aria-keyshortcuts={shortcut('SPLIT')}
               onClick={() => act({ type: 'SPLIT' })}
             >
-              Split <kbd>P</kbd>
+              Split {hint('SPLIT')}
             </button>
             <button
               className="secondary surrender-button"
               disabled={!canSurrender(game)}
+              aria-label="Surrender"
+              aria-keyshortcuts={shortcut('SURRENDER')}
               onClick={() => act({ type: 'SURRENDER' })}
             >
-              Surrender <kbd>R</kbd>
+              Surrender {hint('SURRENDER')}
             </button>
           </>
         )}

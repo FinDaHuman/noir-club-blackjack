@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { newGame, makeShoe, reducer, type Card, type Game } from '../src/game';
 import { readFile } from 'node:fs/promises';
+import { DEFAULT_SETTINGS, SETTINGS_KEY } from '../src/settings';
 const key = 'noir-club.game.v1';
 async function seed(page: Page, ranks: string[], patch: Partial<Game> = {}) {
   const shoe: Card[] = ranks.map((rank, i) => ({ id: `seed-${i}`, rank, suit: 'spades' }));
@@ -19,6 +20,38 @@ async function tracker(page: Page) {
   const mobile = page.getByRole('button', { name: 'Open player tracker' });
   if (await mobile.isVisible()) await mobile.click();
   else await page.getByRole('button', { name: 'View tracker' }).click();
+}
+async function assertViewport(page: Page) {
+  expect(
+    await page.evaluate(() => {
+      const footer = document.querySelector('.control-deck')!.getBoundingClientRect();
+      const controls = [
+        ...document.querySelectorAll<HTMLElement>('.topbar button, .actions button, .chip, #wager'),
+      ].filter((el) => el.getClientRects().length > 0);
+      return {
+        scroll: [document.documentElement.scrollWidth, document.documentElement.scrollHeight],
+        viewport: [innerWidth, innerHeight],
+        footerVisible: footer.bottom <= innerHeight + 1,
+        controlsVisible: controls.every((el) => {
+          const r = el.getBoundingClientRect();
+          return (
+            r.left >= 0 && r.right <= innerWidth + 1 && r.top >= 0 && r.bottom <= innerHeight + 1
+          );
+        }),
+      };
+    }),
+  ).toMatchObject({ footerVisible: true, controlsVisible: true });
+  expect(
+    await page.evaluate(
+      () =>
+        document.documentElement.scrollHeight <= innerHeight &&
+        document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  // Mobile WebKit does not implement wheel input; also attempt a programmatic page scroll.
+  if (!test.info().project.use.isMobile) await page.mouse.wheel(0, 500);
+  await page.evaluate(() => window.scrollTo(0, 500));
+  expect(await page.evaluate(() => scrollY)).toBe(0);
 }
 async function monitorCards(page: Page, duration = 2400) {
   await page.bringToFront();
@@ -123,6 +156,7 @@ test('audio creates running output and independent settings persist', async ({ p
     const Original = window.AudioContext;
     (window as any).__contexts = [];
     (window as any).__oscillatorsStarted = 0;
+    (window as any).__audioOutputs = [];
     if (Original) {
       window.AudioContext = class extends Original {
         constructor() {
@@ -137,6 +171,15 @@ test('audio creates running output and independent settings persist', async ({ p
             start(when);
           };
           return osc;
+        }
+        createGain() {
+          const gain = super.createGain();
+          const connect = gain.connect.bind(gain);
+          gain.connect = ((destination: AudioNode) => {
+            if (destination === this.destination) (window as any).__audioOutputs.push(gain);
+            return connect(destination);
+          }) as typeof gain.connect;
+          return gain;
         }
       };
     }
@@ -156,18 +199,42 @@ test('audio creates running output and independent settings persist', async ({ p
       page.getByText('Audio is unavailable in this browser. You can still play.'),
     ).toBeVisible();
   }
-  await page.getByRole('button', { name: 'Mute background music' }).click();
-  await expect(page.getByRole('button', { name: 'Enable background music' })).toHaveAttribute(
-    'aria-pressed',
-    'false',
-  );
-  await page.getByRole('button', { name: 'Mute sound effects' }).click();
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('noir-club.audio')!))).toEqual({
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('checkbox', { name: 'Background music', exact: true }).uncheck();
+  await expect(
+    page.getByRole('checkbox', { name: 'Background music', exact: true }),
+  ).not.toBeChecked();
+  await page.getByRole('checkbox', { name: 'Sound effects', exact: true }).uncheck();
+  if (await page.evaluate(() => typeof AudioContext !== 'undefined')) {
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window as any).__audioOutputs.every((node: GainNode) => node.gain.value < 0.001),
+        ),
+      )
+      .toBe(true);
+  }
+  expect(
+    await page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), SETTINGS_KEY),
+  ).toMatchObject({
     effects: false,
     music: false,
   });
-  await page.getByRole('button', { name: 'Enable background music' }).click();
-  await expect(page.getByRole('button', { name: 'Enable sound effects' })).toBeVisible();
+  await page.getByRole('checkbox', { name: 'Background music', exact: true }).check();
+  await expect(
+    page.getByRole('checkbox', { name: 'Sound effects', exact: true }),
+  ).not.toBeChecked();
+  if (await page.evaluate(() => typeof AudioContext !== 'undefined')) {
+    const volume = page.getByRole('slider', { name: 'Background music volume' });
+    await volume.press('Home');
+    for (let i = 0; i < 4; i++) await volume.press('ArrowRight');
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__audioOutputs[0].gain.value))
+      .toBeCloseTo(0.04, 3);
+    expect(await page.evaluate(() => (window as any).__audioOutputs[1].gain.value)).toBeLessThan(
+      0.001,
+    );
+  }
 });
 test('bet typing, rules dialog, keyboard and reset confirmation', async ({ page }) => {
   await seed(page, ['10', '9', '8', '8']);
@@ -244,18 +311,23 @@ test('a long hand fans without escaping the mobile table', async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 for (const [width, height] of [
+  [320, 568],
   [320, 667],
   [375, 812],
   [390, 844],
   [768, 1024],
   [844, 390],
+  [667, 375],
+  [568, 320],
   [1024, 768],
   [1536, 1024],
+  [1366, 768],
 ]) {
   test(`responsive ${width}x${height}: controls, assets and card clearance`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await seed(page, ['8', '10', '8', '7', '2', '3']);
     await expect(page.getByRole('button', { name: 'Deal me in' })).toBeVisible();
+    await assertViewport(page);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
@@ -274,9 +346,11 @@ for (const [width, height] of [
     await monitorCards(page);
     await page.getByRole('button', { name: 'Deal me in' }).click();
     await assertMotion(page);
+    await assertViewport(page);
     await monitorCards(page);
     await page.getByRole('button', { name: 'Split', exact: true }).click();
     await assertMotion(page);
+    await assertViewport(page);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
@@ -623,6 +697,7 @@ for (const [width, height] of [
       await page.goto('./');
       await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
       await expect(page.locator('.hand-result')).toHaveText(sample.labels);
+      await assertViewport(page);
       await page.evaluate(() => document.fonts.ready);
       const layout = await page.evaluate(() => {
         const rect = (selector: string) =>
@@ -692,3 +767,174 @@ test('all interface values use clear numerals and invalid audio preferences do n
     ).toContain('DM Sans');
   expect(errors).toEqual([]);
 });
+
+test('settings save independent volumes, pace and motion without changing the game', async ({
+  page,
+}) => {
+  await seed(page, ['8', '6', '8', '10', '3']);
+  const before = await saved(page);
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const music = page.getByRole('slider', { name: 'Background music volume' });
+  await music.press('Home');
+  for (let i = 0; i < 4; i++) await music.press('ArrowRight');
+  const effects = page.getByRole('slider', { name: 'Sound effects volume' });
+  await effects.press('Home');
+  await expect(page.getByRole('button', { name: 'Preview sound effect' })).toBeDisabled();
+  await effects.press('ArrowRight');
+  await expect(page.getByRole('button', { name: 'Preview sound effect' })).toBeEnabled();
+  await page.getByRole('combobox', { name: 'Dealing speed', exact: true }).selectOption('relaxed');
+  await page.getByRole('checkbox', { name: 'Reduce motion', exact: true }).check();
+  await expect(page.locator('.app')).toHaveClass(/reduce-motion/);
+  expect(await saved(page)).toEqual(before);
+  const restored = await page.context().newPage();
+  await restored.goto('./');
+  await restored.getByRole('button', { name: 'Open settings' }).click();
+  await expect(restored.getByRole('slider', { name: 'Background music volume' })).toHaveValue('20');
+  await expect(restored.getByRole('slider', { name: 'Sound effects volume' })).toHaveValue('5');
+  await expect(restored.getByRole('combobox', { name: 'Dealing speed', exact: true })).toHaveValue(
+    'relaxed',
+  );
+  await expect(
+    restored.getByRole('checkbox', { name: 'Reduce motion', exact: true }),
+  ).toBeChecked();
+  await restored.getByRole('button', { name: 'Close dialog' }).click();
+  await restored.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(restored.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
+  expect(
+    await restored
+      .locator('.playing-card')
+      .first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).animationDuration)),
+  ).toBeLessThanOrEqual(0.001);
+  await restored.close();
+});
+
+test.describe('desktop keyboard controls', () => {
+  test.use({ viewport: { width: 1366, height: 768 }, isMobile: false, hasTouch: false });
+  test('all six custom shortcuts work, conflicts are rejected and mappings persist', async ({
+    page,
+  }) => {
+    test.setTimeout(60000);
+    await seed(page, ['8', '6', '8', '10', '3', '2', '4', '9', '5', '10', '6', '6', '10']);
+    await expect(page.locator('.deal-button kbd')).toHaveText('Space');
+    await expect(page.locator('.deal-button kbd')).toBeVisible();
+    await page.getByRole('button', { name: 'Open settings' }).click();
+    const hitKey = page.getByRole('button', { name: 'Change hit shortcut', exact: true });
+    await hitKey.click();
+    await hitKey.press('s');
+    await expect(page.getByRole('status').filter({ hasText: 'already assigned' })).toContainText(
+      'Stand',
+    );
+    await hitKey.press('Escape');
+    await expect(page.getByRole('dialog')).toBeVisible();
+    for (const [label, key] of [
+      ['hit', 'x'],
+      ['stand', 'w'],
+      ['double', 'c'],
+      ['split', 'v'],
+      ['surrender', 'z'],
+      ['deal cards', '1'],
+    ]) {
+      const button = page.getByRole('button', { name: `Change ${label} shortcut`, exact: true });
+      await button.click();
+      await button.press(key);
+      await expect(button).toHaveText(key.toUpperCase());
+    }
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(page.locator('.deal-button kbd')).toHaveText('1');
+    await page.getByRole('main').click({ position: { x: 10, y: 10 } });
+    await page.keyboard.press('1');
+    await expect(page.getByRole('button', { name: 'Split', exact: true })).toBeEnabled();
+    await page.keyboard.press('v');
+    await expect(page.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
+    expect((await saved(page)).hands).toHaveLength(2);
+    await page.keyboard.press('x');
+    await expect(page.getByRole('button', { name: 'Stand', exact: true })).toBeEnabled();
+    expect((await saved(page)).hands[0].cards).toHaveLength(3);
+    await page.keyboard.press('w');
+    await expect(page.getByRole('button', { name: 'Double', exact: true })).toBeEnabled();
+    await page.keyboard.press('c');
+    await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+    expect((await saved(page)).hands[1].bet).toBe(100);
+    await page.keyboard.press('1');
+    await expect(page.getByRole('button', { name: 'Surrender', exact: true })).toBeEnabled();
+    await page.keyboard.press('z');
+    await expect(page.locator('.hand-result')).toHaveText('SURRENDER');
+    const restored = await page.context().newPage();
+    await restored.goto('./');
+    await expect(restored.locator('.deal-button kbd')).toHaveText('1');
+    await restored.getByRole('button', { name: 'Open settings' }).click();
+    await restored
+      .getByRole('checkbox', { name: 'Enable keyboard shortcuts', exact: true })
+      .uncheck();
+    await restored.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(restored.locator('.deal-button kbd')).toBeHidden();
+    await restored.getByRole('main').click({ position: { x: 10, y: 10 } });
+    await restored.keyboard.press('1');
+    await expect(restored.locator('.app')).toHaveAttribute('data-phase', 'betting');
+    await restored.close();
+  });
+});
+
+test('mobile hides shortcuts while settings and stats retain their own scrolling', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 667 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const page = await context.newPage();
+  // New contexts do not inherit the configured baseURL.
+  await page.goto(process.env.SITE_URL || 'http://localhost:5173');
+  await expect(page.locator('.deal-button kbd')).toBeHidden();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await expect(page.getByText('Keyboard shortcuts', { exact: true })).toBeHidden();
+  expect(await page.getByRole('dialog').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(
+    true,
+  );
+  await page.locator('.settings-footer').scrollIntoViewIfNeeded();
+  await expect(page.locator('.settings-footer')).toBeInViewport();
+  expect(await page.evaluate(() => scrollY)).toBe(0);
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await tracker(page);
+  expect(await page.getByRole('dialog').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(
+    true,
+  );
+  await page.getByRole('button', { name: 'Reset session' }).scrollIntoViewIfNeeded();
+  await expect(page.getByRole('button', { name: 'Reset session' })).toBeInViewport();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.setViewportSize({ width: 844, height: 390 });
+  await expect(page.locator('.deal-button kbd')).toBeHidden();
+  await assertViewport(page);
+  await context.close();
+});
+
+for (const [speed, factor] of [
+  ['quick', 0.7],
+  ['relaxed', 1.5],
+] as const) {
+  test(`${speed} dealing synchronizes animation and split ace pacing`, async ({ page }) => {
+    test.setTimeout(30000);
+    await page.addInitScript(
+      ({ key, settings }) => localStorage.setItem(key, JSON.stringify(settings)),
+      { key: SETTINGS_KEY, settings: { ...DEFAULT_SETTINGS, speed } },
+    );
+    await seed(page, ['A', '6', 'A', '10', '10', '9', '5']);
+    await page.getByRole('button', { name: 'Deal me in' }).click();
+    expect(
+      await page
+        .locator('.arriving')
+        .first()
+        .evaluate((el) => parseFloat(getComputedStyle(el).animationDuration)),
+    ).toBeCloseTo(0.48 * factor, 2);
+    await expect(page.getByRole('button', { name: 'Split', exact: true })).toBeEnabled();
+    await monitorCards(page, 6500);
+    await page.getByRole('button', { name: 'Split', exact: true }).click();
+    await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled', { timeout: 12000 });
+    await assertMotion(page);
+    expect((await saved(page)).stats.hands).toBe(2);
+    await expect(page.locator('.dealer-hand .card-back')).toHaveCount(0);
+    await assertViewport(page);
+  });
+}

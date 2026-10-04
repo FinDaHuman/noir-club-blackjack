@@ -3,6 +3,7 @@ import { ArrowDownToLine, ArrowRight, RotateCcw, X } from 'lucide-react';
 import { canBet, credits, signed, type Game } from '../game';
 import { accuracySummary } from '../accuracy';
 import { AccuracyStats } from './AccuracyStats';
+import { SHORTCUTS, keyLabel, type Settings } from '../settings';
 
 export function Sparkline({ game, large = false }: { game: Game; large?: boolean }) {
   const values = [...game.history].reverse().map((r) => r.balance);
@@ -249,7 +250,7 @@ export function Tracker({
     </Dialog>
   );
 }
-export function Rules({ close }: { close: () => void }) {
+export function Rules({ close, settings }: { close: () => void; settings: Settings }) {
   return (
     <Dialog title="The house rules" close={close}>
       <p className="dialog-intro">A classic game. A few things to know before you settle in.</p>
@@ -299,14 +300,21 @@ export function Rules({ close }: { close: () => void }) {
           </p>
         </li>
       </ol>
-      <div className="shortcuts">
+      <div className="shortcuts desktop-only">
         <span>Keyboard</span>
-        <kbd>Space</kbd> Deal <kbd>H</kbd> Hit <kbd>S</kbd> Stand <kbd>D</kbd> Double <kbd>P</kbd>{' '}
-        Split <kbd>R</kbd> Surrender
+        {settings.hotkeys ? (
+          SHORTCUTS.map(([action, label]) => (
+            <span key={action}>
+              <kbd>{keyLabel(settings.keys[action])}</kbd> {label}
+            </span>
+          ))
+        ) : (
+          <span>Shortcuts are disabled in Settings.</span>
+        )}
       </div>
       <p className="rules-note">
-        Music and effects begin with your first interaction. Control each separately at the top of
-        the table.
+        Music and effects begin with your first interaction. Open Settings to adjust each volume,
+        dealing speed, motion, and keyboard shortcuts.
       </p>
     </Dialog>
   );

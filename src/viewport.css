@@ -1,0 +1,750 @@
+/* Viewport layout: the felt stays fixed; dialogs own their scrolling. */
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.app {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.app .topbar {
+  height: 76px;
+  padding: max(8px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) 8px
+    max(24px, env(safe-area-inset-left));
+}
+.topbar nav {
+  gap: 6px;
+}
+.rules-button {
+  gap: 8px;
+}
+.mobile-tracker {
+  display: inline-flex;
+}
+.app .table {
+  min-height: 0 !important;
+  min-width: 0;
+  padding: 8px 0 10px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(68px, 1fr) auto auto;
+  --stage-height: 440px;
+  --sized-card: clamp(40px, calc((var(--stage-height) - 218px) / 2.88), 148px);
+}
+.app .table .hand {
+  --card-w: var(--sized-card);
+}
+.app .dealer-area {
+  width: 60%;
+  grid-row: 1;
+}
+.app .players-area,
+.app .is-split .players-area {
+  width: 66%;
+  max-width: 950px;
+  gap: 22px;
+  grid-row: 3;
+}
+.app .table-lettering {
+  grid-row: 2;
+  height: 100%;
+  max-height: 110px;
+  width: min(84%, 850px);
+  min-height: 0;
+}
+.app .hand-label {
+  min-height: 28px;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.app .hand-label > span {
+  font-size: 10px;
+  letter-spacing: 1.7px;
+}
+.app .hand-label .score {
+  font-size: 22px;
+  line-height: 1;
+  padding: 3px 7px;
+}
+.app .dealer-hand .hand-label {
+  margin-bottom: 8px;
+}
+.app .player-hand .hand-label {
+  margin-top: 8px;
+}
+.app .hand-status {
+  min-height: 16px;
+  margin-top: 4px;
+  line-height: 16px;
+  font-size: 9px;
+}
+.app .hand-result {
+  font-size: 9px;
+}
+.app .table-message {
+  margin-top: 8px;
+  min-height: 42px;
+  align-self: end;
+  grid-row: 4;
+}
+.app .table-message > span {
+  font-size: clamp(14px, 1.3vw, 19px);
+  line-height: 1.3;
+}
+.app .table-message > b,
+.app .table-message > small {
+  font-size: 11px;
+  line-height: 1.3;
+  margin-top: 3px;
+}
+.app .empty-seat {
+  --card-w: var(--sized-card);
+  min-height: calc(var(--card-w) * 1.44 + 56px);
+  gap: 8px;
+}
+.empty-seat > span {
+  font-size: 26px;
+}
+.app .session {
+  left: 3%;
+  width: 150px;
+  bottom: 15%;
+}
+.table-note {
+  display: none;
+}
+.app .control-deck {
+  min-height: 0 !important;
+  display: grid;
+  grid-template-columns: minmax(110px, 0.8fr) 140px minmax(200px, 1.5fr) minmax(310px, 2.3fr);
+  gap: 16px;
+  padding: 16px max(24px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom))
+    max(24px, env(safe-area-inset-left));
+}
+.app .bankroll {
+  grid-area: auto;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.app .bankroll strong {
+  font-size: clamp(21px, 2.1vw, 30px);
+  overflow-wrap: anywhere;
+}
+.app .bankroll small {
+  display: none;
+}
+.app .eyeline {
+  margin-bottom: 7px;
+  font-size: 9px;
+  letter-spacing: 1.5px;
+}
+.app .bet-controls {
+  grid-area: auto;
+  justify-self: stretch;
+}
+.app .bet-controls .eyeline {
+  text-align: left;
+}
+.app .bet-input {
+  gap: 5px;
+}
+.app .adjust {
+  width: 32px;
+  height: 36px;
+}
+.app .bet-input input {
+  width: 64px;
+  height: 36px;
+  font-size: 18px;
+}
+.app .chips {
+  grid-area: auto;
+  padding: 5px 0;
+  justify-content: center;
+  gap: clamp(8px, 1.2vw, 18px);
+}
+.app .chip {
+  width: 44px;
+  height: 44px;
+}
+.app .chip span {
+  font-size: 14px;
+}
+.app .chip.selected {
+  outline-offset: 3px;
+  transform: translateY(-2px);
+}
+.app .actions {
+  grid-area: auto;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+.app .betting-actions {
+  grid-template-columns: 1fr;
+}
+.app .insurance-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.app .actions .primary,
+.app .actions .secondary {
+  min-height: 48px;
+  padding: 7px 5px;
+  gap: 4px;
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  flex-direction: column;
+}
+.app .actions .deal-button {
+  flex-direction: row;
+  justify-content: center;
+  gap: 14px;
+  padding: 10px !important;
+}
+.app .action-hint {
+  position: static;
+  grid-column: 1 / -1;
+  font-size: 9px;
+  line-height: 1.25;
+}
+.app .actions kbd {
+  display: none;
+  padding: 2px 5px;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0;
+  border-color: currentColor;
+  opacity: 0.75;
+}
+@media (hover: hover) and (pointer: fine) and (min-width: 701px) {
+  .show-hotkeys .actions kbd {
+    display: inline-block;
+  }
+}
+.dialog {
+  overscroll-behavior: contain;
+  overflow-y: auto;
+}
+.dialog-heading {
+  position: sticky;
+  top: -30px;
+  background: #082e24;
+  z-index: 3;
+  padding-top: 8px;
+  padding-bottom: 12px;
+}
+.arriving {
+  animation-duration: var(--deal-duration, 480ms);
+}
+.card-flipper.is-flipping {
+  animation-duration: var(--reveal-duration, 520ms);
+}
+.card-flipper.is-peeking {
+  animation-duration: var(--peek-duration, 1050ms);
+}
+.card-position {
+  /* Reflow seats immediately on split/rotation; arrival and rotation still animate.
+     Interpolating percentage-based left offsets can escape a newly narrowed hand. */
+  transition-property: transform;
+  transition-duration: var(--move-duration, 350ms);
+}
+.reduce-motion *,
+.reduce-motion *:before,
+.reduce-motion *:after {
+  animation-duration: 0.001ms !important;
+  animation-delay: 0ms !important;
+  transition-duration: 0.001ms !important;
+}
+.settings-section {
+  padding: 18px 0;
+  border-top: 1px solid #d7b78033;
+}
+.settings-section h3 {
+  margin: 0 0 16px;
+  color: var(--gold);
+  font-size: 13px;
+  letter-spacing: 1px;
+}
+.setting-toggle,
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  font-size: 13px;
+}
+.setting-toggle input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--gold);
+  cursor: pointer;
+}
+.volume-setting + .volume-setting {
+  margin-top: 12px;
+}
+.volume-slider {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  padding: 2px 0 12px;
+}
+.volume-slider input {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--gold);
+  height: 28px;
+  cursor: pointer;
+}
+.volume-slider output {
+  width: 45px;
+  color: var(--gold);
+  font-size: 12px;
+  text-align: right;
+}
+.setting-row select {
+  font: inherit;
+  color: #f3e5c9;
+  background: #031f18;
+  border: 1px solid #d7b78066;
+  border-radius: 4px;
+  padding: 10px;
+}
+.setting-note {
+  font-size: 11px;
+  color: #b9cbbc;
+  line-height: 1.6;
+  margin: 6px 0 12px;
+}
+.key-bindings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 18px;
+}
+.key-binding {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+.key-binding-button {
+  min-width: 68px;
+  min-height: 40px;
+  color: var(--gold);
+  background: #021c16;
+  border: 1px solid #d7b78055;
+  border-radius: 4px;
+  font: inherit;
+}
+.key-binding-button.listening {
+  outline: 2px solid var(--gold);
+  font-size: 10px;
+}
+.key-feedback {
+  min-height: 18px;
+  color: #e7bd93;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.settings-footer {
+  margin-bottom: 0;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.app .toast {
+  position: fixed;
+  bottom: 16px;
+  max-width: calc(100% - 32px);
+  pointer-events: none;
+}
+
+@media (max-width: 1200px) {
+  .app .control-deck {
+    grid-template-columns: 110px 132px 1fr;
+    gap: 10px 18px;
+    padding-top: 12px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  .app .chips {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  .app .actions {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .app .actions .primary,
+  .app .actions .secondary {
+    flex-direction: row;
+    gap: 8px;
+    min-height: 42px;
+  }
+  .app .action-hint {
+    display: none;
+  }
+  .app .session {
+    display: none;
+  }
+  .app .players-area,
+  .app .is-split .players-area {
+    width: 88%;
+  }
+}
+@media (max-width: 700px) {
+  .app .topbar {
+    height: calc(56px + env(safe-area-inset-top));
+    padding: env(safe-area-inset-top) max(12px, env(safe-area-inset-right)) 0
+      max(12px, env(safe-area-inset-left));
+  }
+  .app .brand {
+    gap: 6px;
+  }
+  .app .brand span {
+    font-size: 16px;
+    letter-spacing: 1.2px;
+  }
+  .app .brand-spade {
+    width: 23px;
+    height: 30px;
+  }
+  .app .brand small {
+    font-size: 6px;
+    letter-spacing: 3px;
+    margin-top: 4px;
+  }
+  .app .topbar nav {
+    gap: 0;
+  }
+  .app .topbar nav button {
+    min-width: 36px;
+    min-height: 42px;
+    padding: 8px;
+  }
+  .app .learn-button span,
+  .app .rules-button span {
+    display: none;
+  }
+  .app .fullscreen-button,
+  .nav-divider {
+    display: none;
+  }
+  .app .table {
+    padding-top: 5px;
+  }
+  .app .dealer-area {
+    width: 92%;
+  }
+  .app .players-area,
+  .app .is-split .players-area {
+    width: 94%;
+    gap: 10px;
+  }
+  .app .is-split .player-hand {
+    --card-w: min(var(--sized-card), 21vw);
+  }
+  .app .table-lettering {
+    width: 100%;
+    max-height: 82px;
+  }
+  .app .hand-label {
+    gap: 5px;
+  }
+  .app .hand-label > span {
+    font-size: 9px;
+    letter-spacing: 1px;
+  }
+  .app .is-split .hand-label > span {
+    font-size: 8px;
+  }
+  .app .hand-label .score {
+    font-size: 20px;
+  }
+  .app .score small {
+    font-size: 9px;
+    letter-spacing: 0;
+  }
+  .app .hand-label i {
+    margin-left: 4px;
+  }
+  .app .table-message > span {
+    font-size: 14px;
+  }
+  .app .empty-seat > span {
+    font-size: 23px;
+  }
+  .app .empty-seat .text-button {
+    font-size: 11px;
+  }
+  .app .control-deck {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+    padding: 10px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
+  }
+  .app .bankroll {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .app .bankroll strong {
+    font-size: 24px;
+  }
+  .app .bankroll svg {
+    width: 20px;
+  }
+  .app .bankroll .eyeline {
+    font-size: 8px;
+    margin-bottom: 4px;
+  }
+  .app .bet-controls {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+  .app .bet-controls .eyeline {
+    text-align: right;
+    margin-bottom: 4px;
+    font-size: 8px;
+  }
+  .app .bet-input input {
+    height: 32px;
+    width: 54px;
+    font-size: 17px;
+  }
+  .app .adjust {
+    width: 32px;
+    height: 32px;
+  }
+  .app .chips {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    gap: clamp(15px, 6vw, 36px);
+    padding: 5px 0 8px;
+  }
+  .app .chip {
+    width: 36px;
+    height: 36px;
+    padding: 3px;
+  }
+  .app .chip span {
+    font-size: 12px;
+  }
+  .app .actions {
+    grid-row: 3;
+    grid-column: 1 / -1;
+    gap: 6px;
+  }
+  .app .playing-actions {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .app .playing-actions button {
+    grid-column: span 2;
+  }
+  .app .playing-actions button:nth-child(n + 4) {
+    grid-column: span 3;
+  }
+  .app .actions .primary,
+  .app .actions .secondary {
+    min-height: 40px;
+    font-size: 11px;
+  }
+  .app .actions .deal-button {
+    min-height: 42px !important;
+  }
+  .app .control-deck:has(.actions:not(.betting-actions)) .actions {
+    grid-row: 2;
+  }
+  .dialog-heading {
+    top: -23px;
+  }
+  .key-bindings {
+    grid-template-columns: 1fr;
+  }
+}
+@media (hover: none), (pointer: coarse), (max-width: 700px) {
+  .desktop-only,
+  .shortcuts,
+  .app .actions kbd {
+    display: none !important;
+  }
+}
+/* On the shortest portrait screens, spend decorative space on legible card ranks. */
+@media (max-width: 700px) and (max-height: 640px) and (orientation: portrait) {
+  .app .table {
+    grid-template-rows: auto minmax(12px, 1fr) auto auto;
+    --sized-card: clamp(40px, calc((var(--stage-height) - 162px) / 2.88), 148px);
+  }
+  .app .table-lettering {
+    display: none;
+  }
+}
+/* Short, wide screens use two seats side by side, leaving the controls in view. */
+@media (max-height: 540px) and (min-width: 480px) {
+  .app .topbar {
+    height: calc(44px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: 0;
+  }
+  .app .brand span {
+    font-size: 18px;
+  }
+  .app .brand-spade {
+    width: 24px;
+    height: 28px;
+  }
+  .app .brand small {
+    font-size: 6px;
+    margin-top: 2px;
+  }
+  .app .table {
+    grid-template-columns: 36% 64%;
+    grid-template-rows: minmax(0, 1fr) auto;
+    --sized-card: clamp(36px, calc((var(--stage-height) - 142px) / 1.44), 112px);
+    padding: 6px 8px 10px;
+  }
+  .app .dealer-area {
+    grid-row: 1;
+    grid-column: 1;
+    align-self: center;
+    width: 94%;
+  }
+  .app .players-area,
+  .app .is-split .players-area {
+    grid-row: 1;
+    grid-column: 2;
+    align-self: center;
+    width: 96%;
+    gap: 10px;
+  }
+  .app .table-lettering {
+    display: none;
+  }
+  .app .table-message {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    margin-top: 8px;
+    min-height: 34px;
+  }
+  .app .table-message > span {
+    font-size: 13px;
+  }
+  .app .table-message > b,
+  .app .table-message > small {
+    font-size: 10px;
+    margin-top: 2px;
+  }
+  .app .hand-label,
+  .app .is-split .hand-label {
+    min-height: 24px;
+  }
+  .app .hand-label .score {
+    font-size: 18px;
+  }
+  .app .hand-label > span {
+    font-size: 9px;
+  }
+  .app .control-deck {
+    grid-template-columns: 100px 126px 1fr;
+    gap: 8px 16px;
+    padding: 8px max(16px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom))
+      max(16px, env(safe-area-inset-left));
+  }
+  .app .control-deck .bankroll {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .app .control-deck .bet-controls {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  .app .control-deck .chips {
+    grid-row: 1;
+    grid-column: 3;
+    gap: 14px;
+    padding: 4px;
+  }
+  .app .control-deck .chip {
+    width: 32px;
+    height: 32px;
+    padding: 3px;
+  }
+  .app .control-deck .chip span {
+    font-size: 11px;
+  }
+  .app .control-deck:has(.actions) .actions {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+  .app .control-deck:has(.actions:not(.betting-actions)) {
+    grid-template-columns: 100px 126px 1fr;
+  }
+  .app .control-deck:has(.actions:not(.betting-actions)) .chips {
+    display: none;
+  }
+  .app .control-deck:has(.actions:not(.betting-actions)) .actions {
+    grid-row: 1;
+    grid-column: 3;
+  }
+  .app .playing-actions {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+  .app .playing-actions button,
+  .app .playing-actions button:nth-child(n + 4) {
+    grid-column: auto;
+  }
+  .app .actions .primary,
+  .app .actions .secondary {
+    min-height: 40px;
+    flex-direction: column;
+    font-size: 10px;
+    gap: 3px;
+  }
+  .app .bankroll strong {
+    font-size: 22px;
+  }
+  .app .eyeline {
+    font-size: 8px;
+    margin-bottom: 4px;
+  }
+  .app .bet-input input {
+    height: 32px;
+    width: 54px;
+  }
+  .app .adjust {
+    width: 30px;
+    height: 32px;
+  }
+  .app .empty-seat {
+    gap: 4px;
+  }
+  .app .empty-seat > svg {
+    display: none;
+  }
+  .app .empty-seat > span {
+    font-size: 20px;
+  }
+}
+@media (max-height: 540px) and (min-width: 480px) and (max-width: 760px) {
+  .app .control-deck:has(.actions:not(.betting-actions)) .actions {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
+}

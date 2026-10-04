@@ -123,32 +123,35 @@ export function PlayingCard({
   delay = 0,
   animate = true,
   peeking = false,
+  speed = 1,
+  reducedMotion = false,
 }: {
   card: Card;
   hidden?: boolean;
   delay?: number;
   animate?: boolean;
   peeking?: boolean;
+  speed?: number;
+  reducedMotion?: boolean;
 }) {
   const [showBack, setShowBack] = useState(Boolean(hidden));
   const [flipping, setFlipping] = useState(false);
-  const previousHidden = useRef(Boolean(hidden));
   useEffect(() => {
     const nextHidden = Boolean(hidden);
-    if (nextHidden === previousHidden.current) return;
-    previousHidden.current = nextHidden;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (nextHidden === showBack || reducedMotion) {
       setShowBack(nextHidden);
+      setFlipping(false);
       return;
     }
     setFlipping(true);
-    const midpoint = setTimeout(() => setShowBack(nextHidden), 260);
-    const end = setTimeout(() => setFlipping(false), 520);
+    const midpoint = setTimeout(() => setShowBack(nextHidden), 260 * speed);
+    const end = setTimeout(() => setFlipping(false), 520 * speed);
     return () => {
       clearTimeout(midpoint);
       clearTimeout(end);
     };
-  }, [hidden]);
+    // showBack is the current animation face, not a reason to restart the reveal.
+  }, [hidden, speed, reducedMotion]);
   return (
     <div
       className={`playing-card ${animate ? 'arriving' : ''}`}
@@ -176,6 +179,8 @@ export function Hand({
   peeking = false,
   waiting = false,
   oneCardOnly = false,
+  speed = 1,
+  reducedMotion = false,
 }: {
   cards: Card[];
   label: string;
@@ -188,6 +193,8 @@ export function Hand({
   peeking?: boolean;
   waiting?: boolean;
   oneCardOnly?: boolean;
+  speed?: number;
+  reducedMotion?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(300);
@@ -233,8 +240,10 @@ export function Hand({
               card={card}
               hidden={hidden && i === 1}
               peeking={peeking && i === 1}
-              delay={dealing ? (i * 2 + (dealer ? 1 : 0)) * 200 : 0}
+              delay={dealing ? (i * 2 + (dealer ? 1 : 0)) * 200 * speed : 0}
               animate={!preview}
+              speed={speed}
+              reducedMotion={reducedMotion}
             />
           </div>
         ))}
