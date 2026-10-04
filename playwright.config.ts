@@ -10,7 +10,15 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'], viewport: { width: 1536, height: 1024 } },
     },
-    { name: 'webkit', use: { ...devices['iPhone 13'], defaultBrowserType: 'webkit' } },
+    {
+      name: 'webkit',
+      use: {
+        ...devices['iPhone 13'],
+        defaultBrowserType: 'webkit',
+        // Keep logical viewport coverage without 9x software-rasterization cost in CI.
+        deviceScaleFactor: process.env.CI ? 1 : 3,
+      },
+    },
   ],
   webServer: process.env.SITE_URL
     ? undefined

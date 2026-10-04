@@ -236,7 +236,7 @@ test('a long hand fans without escaping the mobile table', async ({ page }) => {
   await page.getByRole('button', { name: 'Hit', exact: true }).click();
   await assertMotion(page);
   expect((await saved(page)).hands[0].cards).toHaveLength(19);
-  expect((await saved(page)).phase).toBe('player');
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'player');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 for (const [width, height] of [
