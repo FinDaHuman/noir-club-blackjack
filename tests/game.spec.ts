@@ -9,7 +9,7 @@ async function seed(page: Page, ranks: string[], patch: Partial<Game> = {}) {
     key,
     game,
   });
-  await page.goto('/');
+  await page.goto('./');
   await expect(page.locator('.app')).toHaveAttribute('data-phase', game.phase);
 }
 async function saved(page: Page) {
@@ -92,7 +92,7 @@ test('deal, double, settlement, tracker, CSV and reload persistence', async ({ p
   await page.getByRole('button', { name: 'Close dialog' }).click();
   // Remove seeding on navigation by opening a second page in the same browser context.
   const restored = await page.context().newPage();
-  await restored.goto('/');
+  await restored.goto('./');
   expect((await saved(restored)).balance).toBe(2600);
   await restored.close();
   expect(errors).toEqual([]);
@@ -204,7 +204,7 @@ test('keyboard play, unfinished-hand recovery and reduced motion', async ({ page
   const balance = (await saved(page)).balance;
   const restored = await page.context().newPage();
   await restored.emulateMedia({ reducedMotion: 'reduce' });
-  await restored.goto('/');
+  await restored.goto('./');
   expect((await saved(restored)).phase).toBe('player');
   expect((await saved(restored)).balance).toBe(balance);
   expect((await saved(restored)).hands[0].cards).toHaveLength(3);
@@ -304,7 +304,7 @@ test('opening is empty, totals use legible numerals, and completed cards clear o
   await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
   expect((await saved(page)).balance).toBe(2475);
   const reopened = await page.context().newPage();
-  await reopened.goto('/');
+  await reopened.goto('./');
   await expect(reopened.locator('.app')).toHaveAttribute('data-phase', 'betting');
   await expect(reopened.locator('.playing-card')).toHaveCount(0);
   expect((await saved(reopened)).history[0].results).toEqual(['surrender']);
@@ -342,7 +342,7 @@ test('declined insurance persists across reopening and surrender stays unavailab
   await page.getByRole('button', { name: 'Deal me in' }).click();
   await expect(page.locator('.app')).toHaveAttribute('data-phase', 'insurance');
   const reopened = await page.context().newPage();
-  await reopened.goto('/');
+  await reopened.goto('./');
   await expect(reopened.locator('.app')).toHaveAttribute('data-phase', 'insurance');
   await reopened.getByRole('button', { name: 'No insurance', exact: true }).click();
   await expect(reopened.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
@@ -432,7 +432,7 @@ test('accuracy and mistake review stay in the tracker and include only completed
   );
   expect(csv.split('\n')[1]).toMatch(/,2,1,1,0$/);
   const reopened = await page.context().newPage();
-  await reopened.goto('/');
+  await reopened.goto('./');
   await tracker(reopened);
   await expect(reopened.locator('.accuracy-decision-rate')).toHaveText('50%');
   await expect(reopened.locator('.accuracy-hand-count')).toHaveText('0 of 1 graded hands');
@@ -491,7 +491,7 @@ test('older saved rounds remain ungraded while newly dealt hands count', async (
     key,
     old,
   });
-  await page.goto('/');
+  await page.goto('./');
   await tracker(page);
   await expect(page.locator('.accuracy-hand-rate')).toHaveText('—');
   await expect(page.locator('.accuracy-hand-count')).toHaveText('0 of 0 graded hands');

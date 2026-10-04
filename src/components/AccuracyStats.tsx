@@ -34,7 +34,11 @@ export function AccuracyStats({ game }: { game: Game }) {
         </div>
       </div>
       {!canBet(game) && (
-        <p className="accuracy-pending">This round will be added when it finishes.</p>
+        <p className="accuracy-pending">
+          {game.accuracy
+            ? 'This round will be added when it finishes.'
+            : 'This older round is ungraded. Tracking starts with your next deal.'}
+        </p>
       )}
       <details className="accuracy-method">
         <summary>How accuracy is measured</summary>
