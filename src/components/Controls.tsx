@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Coins, Minus, Plus, RotateCcw, ArrowUpRight } from 'lucide-react';
+import { Coins, Minus, Plus, ArrowUpRight } from 'lucide-react';
 import { keyLabel, type Settings, type ShortcutAction } from '../settings';
 import {
   canBet,
+  canRefill,
   canDouble,
   canSplit,
   canSurrender,
@@ -13,12 +14,12 @@ import {
 export function Controls({
   game,
   act,
-  reset,
+  continueSession,
   settings,
 }: {
   game: Game;
   act: (action: Action) => void;
-  reset: () => void;
+  continueSession: () => void;
   settings: Settings;
 }) {
   const shortcut = (action: ShortcutAction) =>
@@ -32,7 +33,7 @@ export function Controls({
   );
   const betting = canBet(game);
   const playing = game.phase === 'player';
-  const broke = game.balance < 10 && betting;
+  const broke = canRefill(game);
   const [draft, setDraft] = useState(String(game.bet));
   useEffect(() => {
     setDraft(String(game.bet));
@@ -70,7 +71,7 @@ export function Controls({
           <button
             className="adjust"
             aria-label="Decrease bet"
-            disabled={!betting || game.bet <= 10}
+            disabled={!betting || broke || game.bet <= 10}
             onClick={() => act({ type: 'BET', amount: game.bet - 5 })}
           >
             <Minus size={16} />
@@ -84,7 +85,7 @@ export function Controls({
             max={Math.min(500, game.balance)}
             step="5"
             value={betting ? draft : game.hands.reduce((s, h) => s + h.bet, 0)}
-            disabled={!betting}
+            disabled={!betting || broke}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commitBet}
             onKeyDown={(e) => {
@@ -122,15 +123,15 @@ export function Controls({
           <button
             className="primary deal-button"
             aria-label={
-              broke ? 'Start fresh' : game.phase === 'settled' ? 'Deal again' : 'Deal me in'
+              broke ? 'Continue playing' : game.phase === 'settled' ? 'Deal again' : 'Deal me in'
             }
-            aria-keyshortcuts={!broke ? shortcut('DEAL') : undefined}
+            aria-keyshortcuts={shortcut('DEAL')}
             disabled={!broke && game.balance < game.bet}
-            onClick={() => (broke ? reset() : act({ type: 'DEAL' }))}
+            onClick={() => (broke ? continueSession() : act({ type: 'DEAL' }))}
           >
             {broke ? (
               <>
-                <RotateCcw size={18} /> Start fresh
+                Continue playing {hint('DEAL')} <ArrowUpRight size={19} />
               </>
             ) : (
               <>
@@ -204,7 +205,7 @@ export function Controls({
         )}
         <small className="action-hint">
           {broke
-            ? 'Reset your session for 2,500 credits'
+            ? 'Add credits and keep your stats'
             : betting
               ? 'A little luck. A little instinct.'
               : game.phase === 'insurance'

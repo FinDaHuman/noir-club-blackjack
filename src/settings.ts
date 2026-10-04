@@ -13,7 +13,7 @@ export type Settings = {
   effects: boolean;
   musicVolume: number;
   effectsVolume: number;
-  speed: 'relaxed' | 'normal' | 'quick';
+  speed: 'slow' | 'relaxed' | 'normal' | 'quick' | 'fast';
   reducedMotion: boolean;
   hotkeys: boolean;
   showHints: boolean;
@@ -30,7 +30,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showHints: true,
   keys: { HIT: 'h', STAND: 's', DOUBLE: 'd', SPLIT: 'p', SURRENDER: 'r', DEAL: ' ' },
 };
-export const SPEED_FACTOR = { relaxed: 1.5, normal: 1, quick: 0.7 };
+export const SPEED_FACTOR = { slow: 2, relaxed: 1.5, normal: 1, quick: 0.7, fast: 0.5 };
 export const keyLabel = (key: string) => (key === ' ' ? 'Space' : key.toUpperCase());
 export const validKey = (key: string) => /^[a-z0-9 ]$/.test(key);
 
@@ -42,8 +42,7 @@ export function normalizeSettings(value: unknown): Settings {
   for (const key of ['musicVolume', 'effectsVolume'] as const)
     if (typeof source[key] === 'number' && Number.isFinite(source[key]))
       result[key] = Math.round(Math.max(0, Math.min(100, source[key])));
-  if (source.speed === 'relaxed' || source.speed === 'normal' || source.speed === 'quick')
-    result.speed = source.speed;
+  if (source.speed && Object.hasOwn(SPEED_FACTOR, source.speed)) result.speed = source.speed;
   // A malformed or colliding mapping falls back as a group, keeping every action reachable.
   if (
     source.keys &&

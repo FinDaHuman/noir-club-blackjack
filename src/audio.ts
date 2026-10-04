@@ -1,4 +1,5 @@
 import type { Settings } from './settings';
+export type SoundPreviewResult = 'playing' | 'muted' | 'unavailable';
 // An original, synthesized lounge arrangement. No external recordings or requests.
 class TableAudio {
   private context: AudioContext | null = null;
@@ -13,18 +14,26 @@ class TableAudio {
   music = true;
   async unlock() {
     try {
+      if (this.context?.state === 'closed') {
+        if (this.timer) clearInterval(this.timer);
+        this.timer = null;
+        this.context = null;
+        this.musicGain = null;
+        this.effectsGain = null;
+      }
       this.context ??= new AudioContext();
       if (!this.musicGain) {
         this.musicGain = this.context.createGain();
+        this.musicGain.gain.value = this.music ? this.musicVolume * 0.002 : 0;
         this.musicGain.connect(this.context.destination);
       }
       if (!this.effectsGain) {
         this.effectsGain = this.context.createGain();
+        this.effectsGain.gain.value = this.effects ? this.effectsVolume / 80 : 0;
         this.effectsGain.connect(this.context.destination);
       }
-      this.musicGain.gain.value = this.music ? this.musicVolume * 0.002 : 0;
-      this.effectsGain.gain.value = this.effects ? this.effectsVolume / 80 : 0;
-      if (this.context.state === 'suspended') await this.context.resume();
+      if (this.context.state !== 'running') await this.context.resume();
+      if (this.context.state !== 'running') return false;
       if (!this.timer) {
         this.next = this.context.currentTime + 0.08;
         this.timer = setInterval(() => this.schedule(), 100);
@@ -40,16 +49,18 @@ class TableAudio {
     this.musicVolume = settings.musicVolume;
     this.effectsVolume = settings.effectsVolume;
     if (this.context) {
-      this.musicGain?.gain.setTargetAtTime(
-        this.music ? this.musicVolume * 0.002 : 0,
-        this.context.currentTime,
-        0.05,
-      );
-      this.effectsGain?.gain.setTargetAtTime(
-        this.effects ? this.effectsVolume / 80 : 0,
-        this.context.currentTime,
-        0.05,
-      );
+      const now = this.context.currentTime;
+      const volume = (node: GainNode | null, target: number) => {
+        if (!node) return;
+        const current = node.gain.value;
+        // Keep idle buses at the requested level and replace any earlier volume ramp.
+        node.gain.cancelScheduledValues(now);
+        node.gain.value = target;
+        node.gain.setValueAtTime(current, now);
+        node.gain.linearRampToValueAtTime(target, now + 0.05);
+      };
+      volume(this.musicGain, this.music ? this.musicVolume * 0.002 : 0);
+      volume(this.effectsGain, this.effects ? this.effectsVolume / 80 : 0);
     }
   }
   private tone(
@@ -140,7 +151,17 @@ class TableAudio {
       this.beat++;
     }
   }
-  play(effect: 'card' | 'chip' | 'win' | 'loss' | 'push') {
+  async preview(): Promise<SoundPreviewResult> {
+    if (!this.effects || this.effectsVolume === 0) return 'muted';
+    if (!(await this.unlock())) return 'unavailable';
+    if (!this.effects || this.effectsVolume === 0) return 'muted';
+    // Allow the audio output to wake before a recognizable sequence of table sounds.
+    this.play('card', 0.08);
+    this.play('chip', 0.4);
+    this.play('win', 0.65);
+    return 'playing';
+  }
+  play(effect: 'card' | 'chip' | 'win' | 'loss' | 'push', delay = 0) {
     const ctx = this.context;
     if (
       !ctx ||
@@ -151,7 +172,7 @@ class TableAudio {
     )
       return;
     const output = this.effectsGain;
-    const now = ctx.currentTime;
+    const now = ctx.currentTime + delay;
     if (effect === 'card') {
       this.noise(now, 0.16, 0.2, output, 900);
       this.tone(160, now + 0.06, 0.05, 0.06, output);

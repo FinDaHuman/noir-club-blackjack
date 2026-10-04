@@ -1,15 +1,7 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useReducer,
-  useRef,
-  useState,
-  type CSSProperties,
-} from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type CSSProperties } from 'react';
 import { BarChart3, BookOpen, Expand, Minimize, Settings2, CircleHelp, Spade } from 'lucide-react';
 import { audio } from './audio';
-import { canBet, loadGame, reducer, SAVE_KEY, signed, type Action } from './game';
+import { canBet, canRefill, loadGame, reducer, SAVE_KEY, signed, type Action } from './game';
 import { Hand } from './components/Cards';
 import { Controls } from './components/Controls';
 import { Dialog, Rules, Session, Tracker } from './components/Tracker';
@@ -20,7 +12,7 @@ import { loadSettings, SETTINGS_KEY, SHORTCUTS, SPEED_FACTOR } from './settings'
 export default function App() {
   const [game, dispatch] = useReducer(reducer, undefined, loadGame);
   const [modal, setModal] = useState<
-    'rules' | 'strategy' | 'tracker' | 'reset' | 'settings' | null
+    'rules' | 'strategy' | 'tracker' | 'reset' | 'settings' | 'refill' | null
   >(null);
   const [settings, setSettings] = useState(loadSettings);
   const [fullscreen, setFullscreen] = useState(false);
@@ -29,7 +21,6 @@ export default function App() {
     () => matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
   const [pageVisible, setPageVisible] = useState(() => !document.hidden);
-  const tableRef = useRef<HTMLElement>(null);
   const speed = SPEED_FACTOR[settings.speed];
   const reducedMotion = settings.reducedMotion || systemReducedMotion;
   const storageWarned = useRef(false);
@@ -44,9 +35,13 @@ export default function App() {
     (action: Action) => {
       unlock();
       if (action.type === 'BET') audio.play('chip');
+      if (action.type === 'DEAL' && canRefill(game)) {
+        setModal('refill');
+        return;
+      }
       dispatch(action);
     },
-    [unlock],
+    [unlock, game],
   );
   useEffect(() => {
     audio.configure(settings);
@@ -61,16 +56,6 @@ export default function App() {
     const update = () => setSystemReducedMotion(media.matches);
     media.addEventListener('change', update);
     return () => media.removeEventListener('change', update);
-  }, []);
-  useLayoutEffect(() => {
-    const table = tableRef.current;
-    if (!table) return;
-    // Size cards from the actual space left by the header and controls, including safe areas.
-    const observer = new ResizeObserver(([entry]) => {
-      table.style.setProperty('--stage-height', `${entry.contentRect.height}px`);
-    });
-    observer.observe(table);
-    return () => observer.disconnect();
   }, []);
   useEffect(() => {
     try {
@@ -227,7 +212,6 @@ export default function App() {
         </nav>
       </header>
       <main
-        ref={tableRef}
         className={`table ${game.hands.length > 1 ? 'is-split' : ''}`}
         aria-label="Blackjack table"
       >
@@ -310,7 +294,12 @@ export default function App() {
           SIX DECKS <span>·</span> YOUR PRIVATE TABLE
         </div>
       </main>
-      <Controls game={game} act={act} reset={() => setModal('reset')} settings={settings} />
+      <Controls
+        game={game}
+        act={act}
+        continueSession={() => setModal('refill')}
+        settings={settings}
+      />
       {modal === 'rules' && <Rules close={() => setModal(null)} settings={settings} />}
       {modal === 'settings' && (
         <Settings
@@ -321,16 +310,36 @@ export default function App() {
             unlock();
           }}
           close={() => setModal(null)}
-          previewSound={() => {
-            void audio.unlock().then((ok) => {
-              if (ok) audio.play('chip');
-            });
-          }}
+          previewSound={() => audio.preview()}
         />
       )}
       {modal === 'strategy' && <Strategy game={game} close={() => setModal(null)} />}
       {modal === 'tracker' && (
         <Tracker game={game} close={() => setModal(null)} reset={() => setModal('reset')} />
+      )}
+      {modal === 'refill' && (
+        <Dialog title="Keep your story going" close={() => setModal(null)}>
+          <p className="dialog-intro">
+            Your bankroll is below the 10-credit minimum. Add 2,500 virtual credits and keep your
+            hand history, accuracy, and stats. Your net result stays at {signed(game.stats.net)} and
+            continues from there; added credits never count as winnings.
+          </p>
+          <div className="reset-actions">
+            <button className="secondary" onClick={() => setModal('reset')}>
+              Reset stats instead
+            </button>
+            <button
+              className="primary"
+              disabled={!canRefill(game)}
+              onClick={() => {
+                dispatch({ type: 'REFILL' });
+                setModal(null);
+              }}
+            >
+              Add 2,500 · keep stats
+            </button>
+          </div>
+        </Dialog>
       )}
       {modal === 'reset' && (
         <Dialog title="A fresh start?" close={() => setModal(null)}>

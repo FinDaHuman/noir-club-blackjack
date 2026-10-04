@@ -1,15 +1,17 @@
 import { useEffect, useRef } from 'react';
 import { ArrowDownToLine, ArrowRight, RotateCcw, X } from 'lucide-react';
-import { canBet, credits, signed, type Game } from '../game';
+import { BANKROLL_REFILL, canBet, credits, signed, type Game } from '../game';
 import { accuracySummary } from '../accuracy';
 import { AccuracyStats } from './AccuracyStats';
 import { SHORTCUTS, keyLabel, type Settings } from '../settings';
 
 export function Sparkline({ game, large = false }: { game: Game; large?: boolean }) {
-  const values = [...game.history].reverse().map((r) => r.balance);
-  values.unshift(
-    game.history.length === 100 ? values[0] - game.history[game.history.length - 1].net : 2500,
-  );
+  // Reconstruct cumulative results, including history older than the 100-round window.
+  // Credit refills are funding, so they must never look like a win on the chart.
+  const values = [game.stats.net - game.history.reduce((net, round) => net + round.net, 0)];
+  [...game.history]
+    .reverse()
+    .forEach((round) => values.push(values[values.length - 1] + round.net));
   if (values.length === 1) values.push(values[0]);
   const min = Math.min(...values) - 30;
   const max = Math.max(...values) + 30;
@@ -21,7 +23,7 @@ export function Sparkline({ game, large = false }: { game: Game; large?: boolean
       className={`sparkline ${large ? 'large' : ''}`}
       viewBox="0 0 300 100"
       role="img"
-      aria-label={`Bankroll trend, current balance ${credits(game.balance)} credits`}
+      aria-label={`Net result trend, cumulative result ${signed(game.stats.net)} credits`}
     >
       <path d="M0 90H300" className="chart-baseline" />
       <polyline points={points} />
@@ -155,6 +157,7 @@ export function Tracker({
         </div>
       </div>
       <Sparkline game={game} large />
+      <p className="setting-note">Cumulative net result · added credits excluded</p>
       <AccuracyStats game={game} />
       <div className="tracker-grid">
         {[
@@ -167,6 +170,8 @@ export function Tracker({
           ['Best win', signed(s.bestWin)],
           ['Best win streak', s.bestStreak],
           ['Total wagered', credits(s.wagered)],
+          ['Bankroll refills', s.refills],
+          ['Credits added after bankruptcy', credits(s.refills * BANKROLL_REFILL)],
           [
             'Current streak',
             s.streak === 0
@@ -295,8 +300,9 @@ export function Rules({ close, settings }: { close: () => void; settings: Settin
         <li>
           <b>Your table, your pace.</b>
           <p>
-            Wagers: 10–500 virtual credits in steps of 5. No purchases or cash-out. Reset your
-            session in the tracker for a fresh 2,500 credits.
+            Wagers: 10–500 virtual credits in steps of 5. No purchases or cash-out. If your bankroll
+            falls below 10, you can add 2,500 credits and keep all your stats, including cumulative
+            losses. Reset your session in the tracker only when you want to clear your stats.
           </p>
         </li>
       </ol>

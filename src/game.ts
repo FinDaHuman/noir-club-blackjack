@@ -35,6 +35,7 @@ export type Round = {
   accuracy: RoundAccuracy | null;
 };
 export type Stats = {
+  refills: number;
   rounds: number;
   hands: number;
   wins: number;
@@ -93,10 +94,12 @@ export type Action =
         | 'DECLINE_INSURANCE'
         | 'SURRENDER'
         | 'DEALER_TICK'
+        | 'REFILL'
         | 'RESET';
     };
 
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+export const BANKROLL_REFILL = 2500;
 export const SUITS: Record<Suit, string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
 export const value = (card: Card) =>
   card.rank === 'A' ? 11 : ['J', 'Q', 'K'].includes(card.rank) ? 10 : Number(card.rank);
@@ -128,7 +131,7 @@ export function newGame(shoe = makeShoe()): Game {
   return {
     version: 1,
     phase: 'betting',
-    balance: 2500,
+    balance: BANKROLL_REFILL,
     bet: 50,
     shoe,
     dealer: [],
@@ -137,6 +140,7 @@ export function newGame(shoe = makeShoe()): Game {
     insuranceBet: 0,
     accuracy: null,
     stats: {
+      refills: 0,
       rounds: 0,
       hands: 0,
       wins: 0,
@@ -161,6 +165,7 @@ export function newGame(shoe = makeShoe()): Game {
   };
 }
 export const canBet = (g: Game) => g.phase === 'betting' || g.phase === 'settled';
+export const canRefill = (g: Game) => canBet(g) && g.balance < 10;
 export const canSurrender = (g: Game) =>
   g.phase === 'player' &&
   g.hands.length === 1 &&
@@ -374,6 +379,21 @@ function settle(g: Game) {
 }
 export function reducer(state: Game, action: Action): Game {
   if (action.type === 'RESET') return canBet(state) ? newGame() : state;
+  if (action.type === 'REFILL') {
+    if (!canRefill(state)) return state;
+    return {
+      ...state,
+      phase: 'betting',
+      balance: state.balance + BANKROLL_REFILL,
+      dealer: [],
+      hands: [],
+      active: 0,
+      insuranceBet: 0,
+      accuracy: null,
+      stats: { ...state.stats, refills: state.stats.refills + 1 },
+      message: '2,500 credits added. Your stats continue.',
+    };
+  }
   if (action.type === 'BET') {
     if (!canBet(state) || !Number.isFinite(action.amount)) return state;
     return {
@@ -590,6 +610,10 @@ export function loadGame(): Game {
         insuranceBet: raw.insuranceBet ?? 0,
         stats: {
           ...raw.stats,
+          refills:
+            Number.isSafeInteger(raw.stats.refills) && raw.stats.refills >= 0
+              ? raw.stats.refills
+              : 0,
           surrenders: raw.stats.surrenders ?? 0,
           insuranceWagered: raw.stats.insuranceWagered ?? 0,
           insuranceNet: raw.stats.insuranceNet ?? 0,

@@ -1,8 +1,17 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { DEFAULT_SETTINGS, loadSettings, normalizeSettings, SETTINGS_KEY } from './settings';
+import {
+  DEFAULT_SETTINGS,
+  loadSettings,
+  normalizeSettings,
+  SETTINGS_KEY,
+  SPEED_FACTOR,
+} from './settings';
 
 afterEach(() => vi.unstubAllGlobals());
 describe('saved table settings', () => {
+  it.each(Object.keys(SPEED_FACTOR))('preserves the %s speed preference', (speed) => {
+    expect(normalizeSettings({ speed }).speed).toBe(speed);
+  });
   it.each([null, 'invalid', 42, [], { keys: null }])(
     'recovers safely from malformed settings: %j',
     (value) => {

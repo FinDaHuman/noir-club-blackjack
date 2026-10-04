@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   canDouble,
+  canRefill,
   canSplit,
   canSurrender,
   loadGame,
@@ -242,10 +243,10 @@ describe('actions, split rules and accounting', () => {
   it('maintains bankroll = starting funds + net over 500 rounds', () => {
     let g = newGame();
     for (let i = 0; i < 500; i++) {
-      if (g.balance < 10) g = reducer(g, { type: 'RESET' });
+      if (g.balance < 10) g = reducer(g, { type: 'REFILL' });
       g = reducer(g, { type: 'BET', amount: 10 });
       g = finish(reducer(g, { type: 'DEAL' }));
-      expect(g.balance).toBe(2500 + g.stats.net);
+      expect(g.balance).toBe(2500 * (1 + g.stats.refills) + g.stats.net);
       expect(g.stats.hands).toBe(g.stats.wins + g.stats.losses + g.stats.pushes);
       expect(g.balance).toBeGreaterThanOrEqual(0);
     }
@@ -267,6 +268,80 @@ describe('actions, split rules and accounting', () => {
     });
     expect(loadGame().phase).toBe('betting');
     vi.unstubAllGlobals();
+  });
+});
+
+describe('continuing after bankruptcy', () => {
+  const bankrupt = () => {
+    let g = newGame([...cards(...Array(6).fill(['10', '10', '8', '9']).flat()), ...makeShoe()]);
+    g = reducer(g, { type: 'BET', amount: 500 });
+    for (let i = 0; i < 5; i++) g = finish(reducer(g, { type: 'DEAL' }));
+    expect(g.balance).toBe(0);
+    return g;
+  };
+  it('keeps every statistic and history entry, then accumulates further losses', () => {
+    const broke = bankrupt();
+    const original = JSON.stringify(broke);
+    const funded = reducer(broke, { type: 'REFILL' });
+    expect(funded.stats).toEqual({ ...broke.stats, refills: 1 });
+    expect(funded.history).toEqual(broke.history);
+    expect(funded.shoe).toEqual(broke.shoe);
+    expect(funded).toMatchObject({ balance: 2500, phase: 'betting', hands: [], dealer: [] });
+    expect(JSON.stringify(broke)).toBe(original);
+    expect(reducer(funded, { type: 'REFILL' })).toBe(funded);
+    const next = finish(reducer(funded, { type: 'DEAL' }));
+    expect(next.balance).toBe(2000);
+    expect(next.stats).toMatchObject({
+      net: -3000,
+      hands: 6,
+      losses: 6,
+      refills: 1,
+      strategyHands: 6,
+      strategyCorrectHands: 6,
+      strategyDecisions: 6,
+      strategyCorrectDecisions: 6,
+    });
+    expect(next.history[0].id).toBe(6);
+    expect(next.history.slice(1)).toEqual(broke.history);
+  });
+  it('preserves remaining fractional credits and supports repeated bankruptcies', () => {
+    let g = bankrupt();
+    g = { ...g, balance: 7.5, stats: { ...g.stats, net: -2492.5 } };
+    g = reducer(g, { type: 'REFILL' });
+    expect(g.balance).toBe(2507.5);
+    expect(g.stats.net).toBe(-2492.5);
+    g = { ...g, balance: 0, stats: { ...g.stats, net: -5000 } };
+    g = reducer(g, { type: 'REFILL' });
+    expect(g).toMatchObject({ balance: 2500, stats: { net: -5000, refills: 2 } });
+  });
+  it('rejects refills while a hand is live or a minimum bet is affordable', () => {
+    for (const phase of [
+      'dealing',
+      'insurance',
+      'peeking',
+      'player',
+      'hitting',
+      'splitting',
+      'split-dealing',
+      'dealer',
+    ] as const) {
+      const g = { ...ready('10', '10', '8', '9'), balance: 0, phase };
+      expect(canRefill(g)).toBe(false);
+      expect(reducer(g, { type: 'REFILL' })).toBe(g);
+    }
+    const g = { ...newGame(), balance: 10 };
+    expect(reducer(g, { type: 'REFILL' })).toBe(g);
+  });
+  it('restores refills and losses after reload, while a deliberate reset clears both', () => {
+    const g = reducer(bankrupt(), { type: 'REFILL' });
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(g) });
+    try {
+      expect(loadGame()).toEqual(g);
+      const reset = reducer(loadGame(), { type: 'RESET' });
+      expect(reset).toMatchObject({ balance: 2500, stats: { net: 0, refills: 0 }, history: [] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
 
@@ -362,6 +437,7 @@ describe('dealer peek, insurance and late surrender', () => {
   it('migrates old saved sessions and resumes insurance / peek without charging twice', () => {
     const old = JSON.parse(JSON.stringify(finish(ready('10', '8', '9', '9'))));
     delete old.insuranceBet;
+    delete old.stats.refills;
     delete old.stats.surrenders;
     delete old.stats.insuranceNet;
     delete old.stats.insuranceWagered;
@@ -372,7 +448,7 @@ describe('dealer peek, insurance and late surrender', () => {
     vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(old) });
     expect(loadGame()).toMatchObject({
       balance: old.balance,
-      stats: { net: old.stats.net, surrenders: 0 },
+      stats: { net: old.stats.net, surrenders: 0, refills: 0 },
       insuranceBet: 0,
     });
     for (const insured of [false, true]) {

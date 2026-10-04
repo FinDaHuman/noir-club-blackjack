@@ -34,7 +34,9 @@ body,
   padding: 8px 0 10px;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(68px, 1fr) auto auto;
-  --stage-height: 440px;
+  /* Query the table's content height during layout, without a delayed observer update. */
+  container-type: size;
+  --stage-height: 100cqh;
   --sized-card: clamp(40px, calc((var(--stage-height) - 218px) / 2.88), 148px);
 }
 .app .table .hand {
@@ -332,6 +334,10 @@ body,
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px 18px;
+}
+.sound-preview-status {
+  min-height: 36px;
+  margin-bottom: 0;
 }
 .key-binding {
   display: flex;

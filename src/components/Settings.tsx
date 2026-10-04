@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { SoundPreviewResult } from '../audio';
 import { Dialog } from './Tracker';
 import {
   DEFAULT_SETTINGS,
@@ -18,10 +19,16 @@ export function Settings({
   settings: Preferences;
   change: (settings: Preferences) => void;
   close: () => void;
-  previewSound: () => void;
+  previewSound: () => Promise<SoundPreviewResult>;
 }) {
   const [listening, setListening] = useState<ShortcutAction | null>(null);
   const [error, setError] = useState('');
+  const [preview, setPreview] = useState<SoundPreviewResult | 'starting' | 'complete' | null>(null);
+  useEffect(() => {
+    if (preview !== 'playing') return;
+    const timer = setTimeout(() => setPreview('complete'), 1700);
+    return () => clearTimeout(timer);
+  }, [preview]);
   const update = <K extends keyof Preferences>(key: K, value: Preferences[K]) =>
     change({ ...settings, [key]: value });
   return (
@@ -62,11 +69,36 @@ export function Settings({
         ))}
         <button
           className="text-button"
-          onClick={previewSound}
-          disabled={!settings.effects || settings.effectsVolume === 0}
+          onClick={async () => {
+            setPreview('starting');
+            try {
+              setPreview(await previewSound());
+            } catch {
+              setPreview('unavailable');
+            }
+          }}
+          disabled={
+            !settings.effects ||
+            settings.effectsVolume === 0 ||
+            preview === 'starting' ||
+            preview === 'playing'
+          }
         >
           Preview sound effect
         </button>
+        <p className="setting-note sound-preview-status" role="status">
+          {!settings.effects || settings.effectsVolume === 0
+            ? 'Turn on sound effects and raise the volume to preview.'
+            : preview === 'starting'
+              ? 'Starting audio…'
+              : preview === 'playing'
+                ? 'Playing: card deal, chips, and a win chime.'
+                : preview === 'complete'
+                  ? 'Preview finished. Adjust the effects volume and try again.'
+                  : preview === 'unavailable'
+                    ? 'Audio could not start. Check your browser’s sound permissions, then try again.'
+                    : 'Hear a card deal, chips, and a win chime at your selected volume.'}
+        </p>
       </section>
       <section className="settings-section" aria-labelledby="pace-heading">
         <h3 id="pace-heading">Table pace</h3>
@@ -76,9 +108,11 @@ export function Settings({
             value={settings.speed}
             onChange={(e) => update('speed', e.target.value as Preferences['speed'])}
           >
+            <option value="slow">Slow</option>
             <option value="relaxed">Relaxed</option>
             <option value="normal">Normal</option>
             <option value="quick">Quick</option>
+            <option value="fast">Fast</option>
           </select>
         </label>
         <p className="setting-note">

@@ -63,6 +63,13 @@ async function monitorCards(page: Page, duration = 2400) {
     const measure = () => {
       samples++;
       const footer = document.querySelector('.control-deck')!.getBoundingClientRect();
+      if (document.querySelector<HTMLElement>('.app')!.dataset.phase === 'settled') {
+        const message = document.querySelector('.table-message')!.getBoundingClientRect();
+        if (message.bottom + 8 > footer.top)
+          failures.push(
+            `End-of-hand message too close to controls: ${footer.top - message.bottom}px`,
+          );
+      }
       document.querySelectorAll<HTMLElement>('.playing-card, .card-flipper').forEach((card) => {
         const r = card.getBoundingClientRect();
         if (r.left < -1 || r.right > innerWidth + 1 || r.bottom > footer.top + 1)
@@ -695,8 +702,10 @@ for (const [width, height] of [
         game,
       });
       await page.goto('./');
+      await monitorCards(page, 1400);
       await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
       await expect(page.locator('.hand-result')).toHaveText(sample.labels);
+      await assertMotion(page);
       await assertViewport(page);
       await page.evaluate(() => document.fonts.ready);
       const layout = await page.evaluate(() => {
@@ -911,8 +920,10 @@ test('mobile hides shortcuts while settings and stats retain their own scrolling
 });
 
 for (const [speed, factor] of [
+  ['slow', 2],
   ['quick', 0.7],
   ['relaxed', 1.5],
+  ['fast', 0.5],
 ] as const) {
   test(`${speed} dealing synchronizes animation and split ace pacing`, async ({ page }) => {
     test.setTimeout(30000);
@@ -929,7 +940,7 @@ for (const [speed, factor] of [
         .evaluate((el) => parseFloat(getComputedStyle(el).animationDuration)),
     ).toBeCloseTo(0.48 * factor, 2);
     await expect(page.getByRole('button', { name: 'Split', exact: true })).toBeEnabled();
-    await monitorCards(page, 6500);
+    await monitorCards(page, Math.max(3000, factor * 4500));
     await page.getByRole('button', { name: 'Split', exact: true }).click();
     await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled', { timeout: 12000 });
     await assertMotion(page);
@@ -938,3 +949,210 @@ for (const [speed, factor] of [
     await assertViewport(page);
   });
 }
+
+test('sound preview emits an audible signal, resumes audio, and respects mute', async ({
+  page,
+}) => {
+  await page.addInitScript(
+    ({ key, settings }) => {
+      localStorage.setItem(key, JSON.stringify(settings));
+      const Original = window.AudioContext;
+      (window as any).__audioContexts = [];
+      (window as any).__effectPeak = 0;
+      if (Original)
+        window.AudioContext = class extends Original {
+          constructor() {
+            super();
+            (window as any).__audioContexts.push(this);
+          }
+          private outputs = 0;
+          createGain() {
+            const gain = super.createGain();
+            const connect = gain.connect.bind(gain);
+            gain.connect = ((destination: AudioNode) => {
+              if (destination === this.destination && ++this.outputs === 2) {
+                const analyser = this.createAnalyser();
+                analyser.fftSize = 2048;
+                connect(analyser);
+                const samples = new Float32Array(analyser.fftSize);
+                setInterval(() => {
+                  analyser.getFloatTimeDomainData(samples);
+                  for (const sample of samples)
+                    (window as any).__effectPeak = Math.max(
+                      (window as any).__effectPeak,
+                      Math.abs(sample),
+                    );
+                }, 10);
+              }
+              return connect(destination);
+            }) as typeof gain.connect;
+            return gain;
+          }
+        };
+    },
+    { key: SETTINGS_KEY, settings: { ...DEFAULT_SETTINGS, music: false } },
+  );
+  await page.goto('./');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const preview = page.getByRole('button', { name: 'Preview sound effect' });
+  await preview.click();
+  if (await page.evaluate(() => typeof AudioContext !== 'undefined')) {
+    await expect(page.locator('.sound-preview-status')).toContainText('Playing: card deal');
+    await expect(preview).toBeDisabled();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__effectPeak))
+      .toBeGreaterThan(0.01);
+    await expect(page.locator('.sound-preview-status')).toContainText('Preview finished');
+    await page.evaluate(async () => {
+      await (window as any).__audioContexts[0].suspend();
+      (window as any).__effectPeak = 0;
+    });
+    await preview.click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__audioContexts[0].state))
+      .toBe('running');
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__effectPeak))
+      .toBeGreaterThan(0.01);
+    await expect(preview).toBeEnabled();
+    await page.evaluate(() => (window as any).__audioContexts[0].close());
+    await preview.click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__audioContexts[1]?.state))
+      .toBe('running');
+  } else {
+    await expect(page.locator('.sound-preview-status')).toContainText('Audio could not start');
+  }
+  await page.getByRole('checkbox', { name: 'Sound effects', exact: true }).uncheck();
+  await expect(preview).toBeDisabled();
+  await expect(page.locator('.sound-preview-status')).toContainText('Turn on sound effects');
+  await page.getByRole('checkbox', { name: 'Sound effects', exact: true }).check();
+  await expect(preview).toBeEnabled();
+  if (await page.evaluate(() => typeof AudioContext !== 'undefined')) {
+    await page.evaluate(() => {
+      (window as any).__effectPeak = 0;
+    });
+    await preview.click();
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__effectPeak))
+      .toBeGreaterThan(0.01);
+    await expect(preview).toBeEnabled();
+  }
+  await page.getByRole('slider', { name: 'Sound effects volume' }).press('Home');
+  await expect(preview).toBeDisabled();
+  await expect(page.locator('.sound-preview-status')).toContainText('raise the volume');
+});
+
+test('sound preview reports unavailable audio inside the settings dialog', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: class {
+        constructor() {
+          throw new Error('Audio unavailable');
+        }
+      },
+    });
+  });
+  await page.goto('./');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Preview sound effect' }).click();
+  await expect(page.locator('.sound-preview-status')).toContainText('Audio could not start');
+  await expect(page.getByRole('button', { name: 'Preview sound effect' })).toBeEnabled();
+  const speed = page.getByRole('combobox', { name: 'Dealing speed', exact: true });
+  await expect(speed.locator('option')).toHaveText(['Slow', 'Relaxed', 'Normal', 'Quick', 'Fast']);
+  await speed.selectOption('fast');
+  const restored = await page.context().newPage();
+  await restored.goto('./');
+  await restored.getByRole('button', { name: 'Open settings' }).click();
+  await expect(restored.getByRole('combobox', { name: 'Dealing speed', exact: true })).toHaveValue(
+    'fast',
+  );
+  await restored.close();
+});
+
+function bankruptSession() {
+  const shoe: Card[] = Array(7)
+    .fill(['10', '10', '8', '9'])
+    .flat()
+    .map((rank, i) => ({ rank, id: `bankrupt-${i}`, suit: 'clubs' }));
+  let game = reducer(newGame([...shoe, ...makeShoe()]), { type: 'BET', amount: 500 });
+  for (let i = 0; i < 5; i++) {
+    game = reducer(game, { type: 'DEAL' });
+    for (let j = 0; j < 10 && game.phase !== 'settled'; j++)
+      game = reducer(game, {
+        type: game.phase === 'player' ? 'STAND' : game.phase === 'dealer' ? 'DEALER_TICK' : 'READY',
+      });
+  }
+  expect(game.balance).toBe(0);
+  // A newly opened table clears the settled cards but retains the session.
+  return { ...game, phase: 'betting' as const, dealer: [], hands: [], accuracy: null };
+}
+
+test('bankruptcy continuation keeps accuracy and losses through the next hand and reload', async ({
+  page,
+}) => {
+  const broke = bankruptSession();
+  await seed(page, [], broke);
+  await assertViewport(page);
+  await page.getByRole('button', { name: 'Continue playing', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('Your net result stays at −2,500');
+  await page.getByRole('button', { name: 'Add 2,500 · keep stats', exact: true }).click();
+  expect((await saved(page)).stats).toEqual({ ...broke.stats, refills: 1 });
+  expect((await saved(page)).history).toEqual(broke.history);
+  await page.getByRole('button', { name: 'Deal me in', exact: true }).click();
+  await page.getByRole('button', { name: 'Stand', exact: true }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+  expect(await saved(page)).toMatchObject({
+    balance: 2000,
+    stats: {
+      net: -3000,
+      refills: 1,
+      hands: 6,
+      strategyCorrectHands: 6,
+      strategyHands: 6,
+    },
+  });
+  await expect(page.locator('.table-message')).not.toContainText(/accuracy|correct|mistake/i);
+  await assertViewport(page);
+  await tracker(page);
+  await expect(page.locator('.tracker-hero')).toContainText('−3,000');
+  await expect(
+    page
+      .getByRole('dialog')
+      .getByRole('img', { name: 'Net result trend, cumulative result −3,000 credits' }),
+  ).toBeVisible();
+  await expect(
+    page.locator('.tracker-grid > div').filter({ hasText: 'Bankroll refills' }),
+  ).toHaveText('Bankroll refills1');
+  await expect(
+    page.locator('.tracker-grid > div').filter({ hasText: 'Credits added after bankruptcy' }),
+  ).toHaveText('Credits added after bankruptcy2,500');
+  const restored = await page.context().newPage();
+  await restored.goto('./');
+  expect((await saved(restored)).stats).toEqual((await saved(page)).stats);
+  expect((await saved(restored)).history).toEqual((await saved(page)).history);
+  await restored.close();
+});
+
+test('bankruptcy can still reset deliberately, with a cancellable confirmation', async ({
+  page,
+}) => {
+  const broke = bankruptSession();
+  await seed(page, [], broke);
+  await page.keyboard.press('Space');
+  await expect(page.getByRole('dialog')).toContainText('Keep your story going');
+  await page.getByRole('button', { name: 'Reset stats instead' }).click();
+  await expect(page.getByRole('dialog')).toContainText('This clears your saved history and stats');
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  expect((await saved(page)).stats).toEqual(broke.stats);
+  await page.getByRole('button', { name: 'Continue playing', exact: true }).click();
+  await page.getByRole('button', { name: 'Reset stats instead' }).click();
+  await page.getByRole('button', { name: 'Start fresh', exact: true }).click();
+  expect(await saved(page)).toMatchObject({
+    balance: 2500,
+    stats: { refills: 0, net: 0, hands: 0 },
+    history: [],
+  });
+  await assertViewport(page);
+});

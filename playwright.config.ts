@@ -12,6 +12,9 @@ export default defineConfig({
     },
     {
       name: 'webkit',
+      // The Windows WebKit port can stall compositor frames across parallel pages.
+      // Keep its interaction tests serial, matching the deployment runner.
+      fullyParallel: false,
       use: {
         ...devices['iPhone 13'],
         defaultBrowserType: 'webkit',
