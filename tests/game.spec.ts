@@ -78,6 +78,8 @@ test('deal, double, settlement, tracker, CSV and reload persistence', async ({ p
   await expect(page.getByRole('button', { name: 'Double', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Double', exact: true }).click();
   await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+  await expect(page.locator('.dealer-hand .card-back')).toHaveCount(0);
+  await expect(page.locator('.dealer-hand .card-face')).toHaveCount(2);
   expect((await saved(page)).balance).toBe(2600);
   await tracker(page);
   await expect(page.getByRole('dialog')).toBeVisible();
@@ -100,6 +102,9 @@ test('split hands remain above felt and inside the safe table during animation',
   await monitorCards(page);
   await page.getByRole('button', { name: 'Deal me in' }).click();
   await assertMotion(page);
+  await expect(page.locator('.player-hand .card-face')).toHaveCount(2);
+  await expect(page.locator('.player-hand .card-back')).toHaveCount(0);
+  await expect(page.locator('.dealer-hand .card-back')).toHaveCount(1);
   await monitorCards(page);
   await page.getByRole('button', { name: 'Split', exact: true }).click();
   await assertMotion(page);

@@ -128,6 +128,25 @@ export function PlayingCard({
   delay?: number;
   animate?: boolean;
 }) {
+  const [showBack, setShowBack] = useState(Boolean(hidden));
+  const [flipping, setFlipping] = useState(false);
+  const previousHidden = useRef(Boolean(hidden));
+  useEffect(() => {
+    const nextHidden = Boolean(hidden);
+    if (nextHidden === previousHidden.current) return;
+    previousHidden.current = nextHidden;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setShowBack(nextHidden);
+      return;
+    }
+    setFlipping(true);
+    const midpoint = setTimeout(() => setShowBack(nextHidden), 260);
+    const end = setTimeout(() => setFlipping(false), 520);
+    return () => {
+      clearTimeout(midpoint);
+      clearTimeout(end);
+    };
+  }, [hidden]);
   return (
     <div
       className={`playing-card ${animate ? 'arriving' : ''}`}
@@ -135,9 +154,8 @@ export function PlayingCard({
       role="img"
       aria-label={hidden ? 'Face-down card' : `${card.rank} of ${card.suit}`}
     >
-      <div className={`card-flipper ${hidden ? 'is-hidden' : ''}`}>
-        <Face card={card} />
-        <div className="card-back" />
+      <div className={`card-flipper ${flipping ? 'is-flipping' : ''}`}>
+        {showBack ? <div className="card-back" /> : <Face card={card} />}
       </div>
     </div>
   );

@@ -290,19 +290,25 @@ nav {
   width: 100%;
   height: 100%;
   position: relative;
-  transform-style: preserve-3d;
-  transition: transform 0.55s cubic-bezier(0.25, 0.6, 0.25, 1);
 }
-.card-flipper.is-hidden {
-  transform: rotateY(180deg);
+.card-flipper.is-flipping {
+  animation: reveal-card 520ms ease-in-out;
+}
+@keyframes reveal-card {
+  0%,
+  100% {
+    transform: scaleX(1);
+  }
+  49%,
+  51% {
+    transform: scaleX(0.025);
+  }
 }
 .card-face,
 .card-back {
   position: absolute;
   inset: 0;
   border-radius: 7px;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
   box-shadow:
     inset 0 0 0 1px #fff7,
     1px 1px 0 #b9b4a5,
@@ -326,7 +332,6 @@ nav {
   color: #a32c28;
 }
 .card-back {
-  transform: rotateY(180deg);
   border: 5px solid #f4ebd7;
   background: #063b2c url('/assets/card-back.webp') center/100% 100% no-repeat;
 }

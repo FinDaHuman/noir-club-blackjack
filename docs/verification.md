@@ -30,6 +30,8 @@ The built-in browser was used first to play a hand, inspect the table, and inspe
 
 The implementation was verified against the concept's visual direction with the intentional adaptations below. No material clipping, overlapping controls or broken interactions remained in the checked states.
 
+The WebKit screenshot review caught a compositing difference that rendered a rotated card back over the face. Card reveals now animate a single visible face with a timed edge-on swap, avoiding 3D backface compositing. Both browser screenshots and face/reveal assertions were checked again after this repair.
+
 Above-the-fold copy audit: brand, rules, payouts, dealer and player labels, bankroll, denominations and actions are retained. Intentional additions are the current-turn message, virtual-credit label, fresh-seat greeting and private-table note. The idle screen uses “Your seat” and “Deal me in”; active play uses the four action buttons. The concept's illustrative 24 hands and 54% win rate are replaced by real zero-history stats.
 
 Other intentional adaptations: accurate native card faces and stylized court cards; generated ornate card-back artwork; native chip controls; compact inline totals; responsive card spacing. These choices preserve accessible ranks, accurate pips and a usable mobile layout. The concept is a design reference, not a literal image embedded as an interface.
