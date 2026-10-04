@@ -13,6 +13,7 @@ See the [mobile preview](docs/mobile-preview.jpg) and [initial-release verificat
 - Start with 2,500 credits. Select a chip or enter a wager of 10–500, in steps of 5.
 - Hit, stand, double, or split a same-rank pair. Blackjack pays 3:2; the dealer stands on all 17s.
 - One split per round, double after split allowed, split aces receive one card. Split 21 pays 1:1.
+- Split hands play sequentially: finish hand 1 before hand 2 receives its next card. Split aces each receive a separately animated card with a pause before the dealer plays. This dealing order follows [New Jersey's blackjack procedure, §13:69F-2.11](https://www.nj.gov/oag/ge/docs/Regulations/CHAPTER69.pdf); table-specific split limits remain as stated above. Automatic dealing pauses while a dialog is open or the tab is hidden.
 - Insurance is offered against an Ace before the dealer peeks: a half-bet side wager paying 2:1 on dealer blackjack. A ten-value upcard also triggers a visible peek.
 - Late surrender returns half your original wager after blackjack has been ruled out, before hitting, doubling or splitting.
 - Open **Learn** for a current-hand adviser, an interactive situation explorer, and hard-total, soft-total and pair strategy charts. Guidance uses six-deck S17/DAS/late-surrender basic strategy, with fallbacks for unavailable actions; it does not count cards or guarantee wins.
@@ -52,4 +53,4 @@ The `Verify and deploy Noir Club` workflow runs the tests and production build b
 
 ## Art and audio
 
-Felt and card-back textures were created for this project with the built-in image generator; optimized production files are in `public/assets`. The soundtrack and table effects are original procedural synthesis. Cormorant Garamond and DM Sans are self-hosted via Fontsource under the SIL Open Font License. Lucide icons use the ISC license. See `docs/assets.md` for the art brief and provenance.
+Felt and card-back textures were created for this project with the built-in image generator; optimized production files are in `public/assets`. The soundtrack and table effects are original procedural synthesis. The interface uses self-hosted DM Sans via Fontsource under the SIL Open Font License, with lining, tabular numerals for values. Card faces use the system Georgia serif for traditional printed ranks. Lucide icons use the ISC license. See `docs/assets.md` for the art brief and provenance.

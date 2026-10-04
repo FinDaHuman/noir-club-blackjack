@@ -276,8 +276,9 @@ export function Rules({ close }: { close: () => void }) {
           <b>Make your move.</b>
           <p>
             Hit to take a card, or stand. Double any two-card hand for one final card. Split a
-            same-rank pair into two equal wagers, once per round. You may double after splitting.
-            Split aces receive one card each; a split 21 pays 1:1.
+            same-rank pair into two equal wagers, once per round. Finish the first split hand before
+            the second receives its next card. You may double after splitting. Split aces receive
+            one card each, dealt in sequence; a split 21 pays 1:1.
           </p>
         </li>
         <li>

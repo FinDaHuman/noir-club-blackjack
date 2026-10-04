@@ -20,9 +20,9 @@ async function tracker(page: Page) {
   if (await mobile.isVisible()) await mobile.click();
   else await page.getByRole('button', { name: 'View tracker' }).click();
 }
-async function monitorCards(page: Page) {
+async function monitorCards(page: Page, duration = 2400) {
   await page.bringToFront();
-  await page.evaluate(() => {
+  await page.evaluate((duration) => {
     (window as any).__cardMonitor = null;
     const failures: string[] = [];
     let samples = 0;
@@ -63,8 +63,8 @@ async function monitorCards(page: Page) {
       clearInterval(timer);
       measure();
       (window as any).__cardMonitor = { failures, frames, samples };
-    }, 2400);
-  });
+    }, duration);
+  }, duration);
 }
 async function assertMotion(page: Page) {
   await expect
@@ -448,7 +448,7 @@ test('accuracy and mistake review stay in the tracker and include only completed
 test('tracker grades split hands separately without duplicating the split decision', async ({
   page,
 }) => {
-  await seed(page, ['8', '6', '8', '10', '3', '2', '10', '5']);
+  await seed(page, ['8', '6', '8', '10', '3', '10', '2', '5']);
   await page.getByRole('button', { name: 'Deal me in' }).click();
   await expect(page.getByRole('button', { name: 'Split', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Split', exact: true }).click();
@@ -505,4 +505,190 @@ test('older saved rounds remain ungraded while newly dealt hands count', async (
   await expect(page.locator('.accuracy-hand-count')).toHaveText('1 of 1 graded hands');
   await expect(page.locator('.accuracy-decision-rate')).toHaveText('100%');
   expect(await saved(page)).toMatchObject({ balance: 2525, stats: { hands: 2 } });
+});
+
+test('split aces deal one at a time, pause for review, and remain clear of the controls', async ({
+  page,
+}) => {
+  await seed(page, ['A', '6', 'A', '10', 'K', '9', '5']);
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(page.getByRole('button', { name: 'Split', exact: true })).toBeEnabled();
+  await monitorCards(page, 6500);
+  await page.evaluate(() => {
+    const events: { phase: string; counts: number[]; time: number }[] = [];
+    (window as any).__splitEvents = events;
+    let last = '';
+    new MutationObserver(() => {
+      const phase = document.querySelector('.app')!.getAttribute('data-phase')!;
+      const counts = [...document.querySelectorAll('.player-hand')].map(
+        (h) => h.querySelectorAll('.playing-card').length,
+      );
+      const key = phase + counts.join(',');
+      if (key !== last) {
+        events.push({ phase, counts, time: performance.now() });
+        last = key;
+      }
+    }).observe(document.querySelector('.app')!, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-phase'],
+    });
+  });
+  await page.getByRole('button', { name: 'Split', exact: true }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'splitting');
+  await expect(page.locator('.player-hand').nth(0).locator('.playing-card')).toHaveCount(1);
+  await expect(page.locator('.player-hand').nth(1).locator('.playing-card')).toHaveCount(1);
+  await tracker(page);
+  const paused = await saved(page);
+  await page.waitForTimeout(1300); // Longer than a dealing step: the dialog must pause progression.
+  expect(await saved(page)).toEqual(paused);
+  expect((await saved(page)).history).toHaveLength(0);
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'split-dealing');
+  await expect(page.getByRole('button', { name: 'Hit', exact: true })).toBeDisabled();
+  await expect(page.locator('.player-hand').nth(1).locator('.playing-card')).toHaveCount(2);
+  await expect(page.locator('.dealer-hand .card-back')).toHaveCount(1);
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+  const events = (await page.evaluate(() => (window as any).__splitEvents)) as {
+    phase: string;
+    counts: number[];
+    time: number;
+  }[];
+  const first = events.find((e) => e.phase === 'split-dealing' && e.counts.join() === '2,1')!;
+  const second = events.find((e) => e.phase === 'split-dealing' && e.counts.join() === '2,2')!;
+  const dealer = events.find((e) => e.phase === 'dealer')!;
+  expect(second.time - first.time).toBeGreaterThanOrEqual(900);
+  expect(dealer.time - second.time).toBeGreaterThanOrEqual(900);
+  expect((await saved(page)).stats).toMatchObject({
+    hands: 2,
+    blackjacks: 0,
+    strategyDecisions: 1,
+    strategyCorrectHands: 2,
+  });
+  await assertMotion(page);
+});
+
+const settledCases = [
+  { name: 'blackjack', player: [['A', 'K']], dealer: ['9', '9'], labels: ['BLACKJACK'] },
+  { name: 'win', player: [['10', '10']], dealer: ['10', '8'], labels: ['WIN'] },
+  { name: 'loss', player: [['10', '8']], dealer: ['10', '10'], labels: ['LOSS'] },
+  { name: 'push', player: [['10', '8']], dealer: ['10', '8'], labels: ['PUSH'] },
+  { name: 'bust', player: [['10', '8', '6']], dealer: ['10', '10'], labels: ['BUST'] },
+  { name: 'surrender', player: [['9', '7']], dealer: ['10', '8'], labels: ['SURRENDER'] },
+  { name: 'insurance', player: [['9', '7']], dealer: ['A', 'K'], labels: ['LOSS'] },
+  {
+    name: 'split',
+    player: [
+      ['10', '9'],
+      ['9', '8'],
+    ],
+    dealer: ['10', '8'],
+    labels: ['WIN', 'LOSS'],
+  },
+];
+for (const [width, height] of [
+  [320, 667],
+  [390, 844],
+  [844, 390],
+]) {
+  test(`every hand result has clear labels and messages at ${width}x${height}`, async ({
+    context,
+  }) => {
+    test.setTimeout(60000);
+    for (const sample of settledCases) {
+      const page = await context.newPage();
+      await page.setViewportSize({ width, height });
+      const cards = (ranks: string[], prefix: string): Card[] =>
+        ranks.map((rank, i) => ({ id: `${prefix}-${i}`, rank, suit: 'hearts' }));
+      const game: Game = {
+        ...newGame(),
+        phase: 'dealer',
+        bet: 500,
+        balance: 14500,
+        dealer: cards(sample.dealer, 'dealer'),
+        insuranceBet: sample.name === 'insurance' ? 250 : 0,
+        hands: sample.player.map((ranks, i) => ({
+          cards: cards(ranks, `hand${i}`),
+          bet: 500,
+          stood: true,
+          split: sample.player.length > 1,
+          ...(sample.name === 'surrender' ? { result: 'surrender' as const } : {}),
+        })),
+      };
+      await page.addInitScript(({ key, game }) => localStorage.setItem(key, JSON.stringify(game)), {
+        key,
+        game,
+      });
+      await page.goto('./');
+      await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+      await expect(page.locator('.hand-result')).toHaveText(sample.labels);
+      await page.evaluate(() => document.fonts.ready);
+      const layout = await page.evaluate(() => {
+        const rect = (selector: string) =>
+          document.querySelector(selector)!.getBoundingClientRect();
+        const message = rect('.table-message'),
+          footer = rect('.control-deck');
+        const results = [...document.querySelectorAll('.hand-status')].map((el) =>
+          el.getBoundingClientRect(),
+        );
+        const labels = [...document.querySelectorAll('.player-hand .hand-label')].map((el) =>
+          el.getBoundingClientRect(),
+        );
+        const cards = [...document.querySelectorAll('.player-hand .playing-card')].map((el) =>
+          el.getBoundingClientRect(),
+        );
+        return {
+          labelsAboveMessage: labels.every((r) => r.bottom + 8 <= message.top),
+          resultsAboveMessage: results.every((r) => r.bottom + 8 <= message.top),
+          cardsAboveMessage: cards.every((r) => r.bottom < message.top),
+          messageAboveControls: message.bottom + 8 <= footer.top,
+          noHorizontalOverflow: document.documentElement.scrollWidth <= innerWidth,
+          headerFits: rect('.brand').right + 2 <= rect('.topbar nav').left,
+        };
+      });
+      expect(layout, sample.name).toEqual({
+        labelsAboveMessage: true,
+        resultsAboveMessage: true,
+        cardsAboveMessage: true,
+        messageAboveControls: true,
+        noHorizontalOverflow: true,
+        headerFits: true,
+      });
+      if (sample.name === 'split')
+        await expect(page.locator('.table-message')).toContainText('All square this round.');
+      await page.close();
+    }
+  });
+}
+
+test('all interface values use clear numerals and invalid audio preferences do not crash the table', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.addInitScript(() => localStorage.setItem('noir-club.audio', 'null'));
+  await seed(page, ['10', '6', '9', '10', '5'], { balance: 14500, bet: 500 });
+  for (const selector of [
+    '.bankroll strong',
+    '.bet-input input',
+    '.chip span',
+    '.brand span',
+    '.table-title',
+  ])
+    expect(
+      await page
+        .locator(selector)
+        .first()
+        .evaluate((el) => getComputedStyle(el).fontFamily),
+    ).toContain('DM Sans');
+  await tracker(page);
+  for (const selector of ['.dialog h2', '.tracker-hero strong'])
+    expect(
+      await page
+        .locator(selector)
+        .first()
+        .evaluate((el) => getComputedStyle(el).fontFamily),
+    ).toContain('DM Sans');
+  expect(errors).toEqual([]);
 });

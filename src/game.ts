@@ -64,6 +64,7 @@ export type Game = {
     | 'player'
     | 'hitting'
     | 'splitting'
+    | 'split-dealing'
     | 'dealer'
     | 'settled';
   balance: number;
@@ -237,15 +238,27 @@ function draw(g: Game) {
   return card;
 }
 function nextHand(g: Game) {
+  g.hands[g.active].stood = true;
   const next = g.hands.findIndex((h, i) => i > g.active && !h.stood && score(h.cards).total < 21);
   if (next >= 0) {
     g.active = next;
+    if (g.hands[next].cards.length === 1) return dealSplitCard(g);
     g.phase = 'player';
     g.message = `Your turn · hand ${next + 1}`;
   } else {
     g.phase = 'dealer';
     g.message = 'Dealer’s turn';
   }
+  return g;
+}
+function dealSplitCard(g: Game) {
+  const hand = g.hands[g.active];
+  hand.cards.push(draw(g));
+  hand.stood = hand.cards[0].rank === 'A';
+  g.phase = 'split-dealing';
+  g.message = hand.stood
+    ? `Split aces · one card to hand ${g.active + 1}`
+    : `Dealing to hand ${g.active + 1}…`;
   return g;
 }
 function settle(g: Game) {
@@ -350,7 +363,9 @@ function settle(g: Game) {
           : net > 0
             ? 'The table is yours.'
             : net === 0
-              ? 'A push. All square.'
+              ? g.hands.every((hand) => hand.result === 'push')
+                ? 'A push. All square.'
+                : 'All square this round.'
               : g.hands.every((h) => score(h.cards).total > 21)
                 ? 'Busted. A fresh hand awaits.'
                 : 'This one goes to the house.';
@@ -440,7 +455,8 @@ export function reducer(state: Game, action: Action): Game {
         : 'No blackjack. Your move.';
       return g;
     }
-    if (g.phase === 'hitting' || g.phase === 'splitting') {
+    if (g.phase === 'splitting' && h.cards.length === 1) return dealSplitCard(g);
+    if (['hitting', 'splitting', 'split-dealing'].includes(g.phase)) {
       if (h.stood || score(h.cards).total >= 21) return nextHand(g);
       g.phase = 'player';
       g.message =
@@ -487,16 +503,15 @@ export function reducer(state: Game, action: Action): Game {
   if (action.type === 'SPLIT' && canSplit(g)) {
     recordDecision(g, action.type);
     g.balance -= h.bet;
-    const aces = h.cards[0].rank === 'A';
     g.hands = h.cards.map((card) => ({
-      cards: [card, draw(g)],
+      cards: [card],
       bet: h.bet,
-      stood: aces,
+      stood: false,
       split: true,
       decisionIds: [...(h.decisionIds ?? [])],
     }));
     g.phase = 'splitting';
-    g.message = aces ? 'Split aces receive one card each.' : 'Two hands. Two possibilities.';
+    g.message = 'Separating your pair…';
     return g;
   }
   return state;
@@ -522,6 +537,7 @@ export function loadGame(): Game {
         'player',
         'hitting',
         'splitting',
+        'split-dealing',
         'dealer',
         'settled',
       ].includes(raw.phase) &&
@@ -532,7 +548,17 @@ export function loadGame(): Game {
       Array.isArray(raw.hands) &&
       raw.hands.length <= 2 &&
       raw.hands.every(
-        (h) => h.cards.length >= 2 && h.cards.every(isCard) && Number.isFinite(h.bet),
+        (h, i) =>
+          Array.isArray(h.cards) &&
+          (h.cards.length >= 2 ||
+            (h.cards.length === 1 &&
+              h.split &&
+              !h.stood &&
+              raw.hands.length === 2 &&
+              (raw.phase === 'splitting' ||
+                (i > raw.active && ['split-dealing', 'player', 'hitting'].includes(raw.phase))))) &&
+          h.cards.every(isCard) &&
+          Number.isFinite(h.bet),
       ) &&
       (canBet(raw) || !!raw.hands[raw.active]) &&
       raw.stats &&

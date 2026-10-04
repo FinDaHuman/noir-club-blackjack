@@ -123,19 +123,26 @@ describe('actions, split rules and accounting', () => {
     expect(canSplit(ready('J', '9', 'K', '7'))).toBe(false);
     let g = reducer(ready('8', '10', '8', '7', '2', '3'), { type: 'SPLIT' });
     expect(g.balance).toBe(2400);
-    expect(g.hands.map((h) => h.cards.map((c) => c.rank))).toEqual([
-      ['8', '2'],
-      ['8', '3'],
-    ]);
+    expect(g.hands.map((h) => h.cards.map((c) => c.rank))).toEqual([['8'], ['8']]);
+    g = reducer(g, { type: 'READY' });
+    expect(g.phase).toBe('split-dealing');
+    expect(g.hands.map((h) => h.cards.map((c) => c.rank))).toEqual([['8', '2'], ['8']]);
+    expect(g.shoe[0].rank).toBe('3');
+    for (const type of ['HIT', 'STAND', 'DOUBLE', 'SPLIT'] as const)
+      expect(reducer(g, { type })).toBe(g);
     g = reducer(g, { type: 'READY' });
     expect(canSplit(g)).toBe(false);
     g = reducer(g, { type: 'STAND' });
     expect(g.active).toBe(1);
+    expect(g.phase).toBe('split-dealing');
+    expect(g.hands[1].cards.map((c) => c.rank)).toEqual(['8', '3']);
+    g = reducer(g, { type: 'READY' });
     expect(g.phase).toBe('player');
     expect(finish(g).stats.hands).toBe(2);
   });
   it('allows double after split', () => {
     let g = reducer(ready('8', '10', '8', '7', '3', '2', 'K'), { type: 'SPLIT' });
+    g = reducer(g, { type: 'READY' });
     g = reducer(g, { type: 'READY' });
     expect(canDouble(g)).toBe(true);
     g = reducer(g, { type: 'DOUBLE' });
@@ -152,8 +159,69 @@ describe('actions, split rules and accounting', () => {
   it('skips a split 21 and plays the other hand', () => {
     let g = reducer(ready('K', '10', 'K', '7', 'A', '2'), { type: 'SPLIT' });
     g = reducer(g, { type: 'READY' });
+    g = reducer(g, { type: 'READY' });
     expect(g.active).toBe(1);
+    expect(g.phase).toBe('split-dealing');
+    g = reducer(g, { type: 'READY' });
     expect(g.phase).toBe('player');
+  });
+  it('draws for the first split hand before exposing or drawing the second hand card', () => {
+    let g = reducer(ready('8', '6', '8', '10', '2', '3', '4', '5'), { type: 'SPLIT' });
+    g = reducer(reducer(g, { type: 'READY' }), { type: 'READY' });
+    g = reducer(reducer(g, { type: 'HIT' }), { type: 'READY' });
+    expect(g.hands.map((h) => h.cards.map((c) => c.rank))).toEqual([['8', '2', '3'], ['8']]);
+    g = reducer(g, { type: 'STAND' });
+    expect(g.hands[1].cards.map((c) => c.rank)).toEqual(['8', '4']);
+  });
+  it('gives each split ace a separate dealing phase before revealing the dealer', () => {
+    let g = reducer(ready('A', '6', 'A', '10', 'K', '9', '5'), { type: 'SPLIT' });
+    expect(g.hands.map((h) => h.cards.length)).toEqual([1, 1]);
+    g = reducer(g, { type: 'READY' });
+    expect(g).toMatchObject({ phase: 'split-dealing', active: 0 });
+    expect(g.hands.map((h) => h.cards.length)).toEqual([2, 1]);
+    g = reducer(g, { type: 'READY' });
+    expect(g).toMatchObject({ phase: 'split-dealing', active: 1 });
+    expect(g.hands.map((h) => h.cards.length)).toEqual([2, 2]);
+    expect(g.history).toHaveLength(0);
+    expect(reducer(g, { type: 'HIT' })).toBe(g);
+    g = reducer(g, { type: 'READY' });
+    expect(g.phase).toBe('dealer');
+    expect(finish(g).stats.blackjacks).toBe(0);
+  });
+  it('resumes each split stage without losing pending cards or charging twice', () => {
+    let g = reducer(ready('8', '6', '8', '10', '2', '3', '4', '5'), { type: 'SPLIT' });
+    for (const type of ['READY', 'READY', 'HIT', 'READY', 'STAND', 'READY'] as const) {
+      vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(g) });
+      const restored = loadGame();
+      expect(restored).toEqual(g);
+      g = reducer(restored, { type });
+      expect(g.balance).toBe(2400);
+    }
+    vi.unstubAllGlobals();
+    expect(g.hands.map((h) => h.cards.map((c) => c.rank))).toEqual([
+      ['8', '2', '3'],
+      ['8', '4'],
+    ]);
+    expect(finish(g).stats.wagered).toBe(100);
+  });
+  it('preserves already-dealt split hands from older saves', () => {
+    for (const rank of ['8', 'A']) {
+      const g = reducer(ready(rank, '6', rank, '10', '3', '4', '5'), { type: 'SPLIT' });
+      // The previous release dealt both second cards as soon as Split was selected.
+      g.hands.forEach((hand) => {
+        hand.cards.push(g.shoe.shift()!);
+        hand.stood = rank === 'A';
+      });
+      const remainingShoe = [...g.shoe];
+      vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(g) });
+      const restored = loadGame();
+      expect(restored).toEqual(g);
+      const next = reducer(restored, { type: 'READY' });
+      expect(next.shoe).toEqual(remainingShoe);
+      expect(next.balance).toBe(2400);
+      expect(next.phase).toBe(rank === 'A' ? 'dealer' : 'player');
+    }
+    vi.unstubAllGlobals();
   });
   it('does not mutate previous game state', () => {
     const g = ready('8', '10', '7', '6', '3');

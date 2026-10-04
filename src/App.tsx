@@ -18,7 +18,8 @@ import { Strategy } from './components/Strategy';
 
 function readPrefs() {
   try {
-    return JSON.parse(localStorage.getItem('noir-club.audio') || '{}');
+    const prefs = JSON.parse(localStorage.getItem('noir-club.audio') || '{}');
+    return prefs && typeof prefs === 'object' ? prefs : {};
   } catch {
     return {};
   }
@@ -31,6 +32,7 @@ export default function App() {
   const [fullscreen, setFullscreen] = useState(false);
   const [notice, setNotice] = useState('');
   const [audioStarted, setAudioStarted] = useState(false);
+  const [pageVisible, setPageVisible] = useState(() => !document.hidden);
   const storageWarned = useRef(false);
   const preview = game.phase === 'betting';
   const dealerHidden = !['dealer', 'settled'].includes(game.phase);
@@ -68,11 +70,13 @@ export default function App() {
     }
   }, [game]);
   useEffect(() => {
+    if (modal || !pageVisible) return;
     const delays: Record<string, number> = {
       dealing: 1200,
       peeking: 1100,
-      hitting: 500,
+      hitting: 600,
       splitting: 650,
+      'split-dealing': 1000,
       dealer: 850,
     };
     const delay = delays[game.phase];
@@ -82,18 +86,19 @@ export default function App() {
       delay,
     );
     return () => clearTimeout(timer);
-  }, [game.phase, game.dealer.length]);
+  }, [game.phase, game.dealer.length, game.active, modal, pageVisible]);
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
     if (game.phase === 'dealing')
       [0, 200, 400, 600].forEach((ms) => timers.push(setTimeout(() => audio.play('card'), ms)));
-    else if (['hitting', 'splitting', 'dealer', 'peeking'].includes(game.phase)) audio.play('card');
+    else if (['hitting', 'splitting', 'split-dealing', 'dealer', 'peeking'].includes(game.phase))
+      audio.play('card');
     else if (game.phase === 'settled') {
       const net = game.history[0]?.net ?? 0;
       audio.play(net > 0 ? 'win' : net < 0 ? 'loss' : 'push');
     }
     return () => timers.forEach(clearTimeout);
-  }, [game.phase, game.dealer.length]);
+  }, [game.phase, game.dealer.length, game.active]);
   useEffect(() => {
     const keydown = (e: KeyboardEvent) => {
       if (
@@ -118,7 +123,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', keydown);
   }, [act, modal]);
   useEffect(() => {
-    const fn = () => audio.visibility(document.hidden);
+    const fn = () => {
+      audio.visibility(document.hidden);
+      setPageVisible(!document.hidden);
+    };
     document.addEventListener('visibilitychange', fn);
     const fs = () => setFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', fs);
@@ -224,14 +232,14 @@ export default function App() {
         </div>
         <svg
           className="table-lettering"
-          viewBox="0 0 900 240"
+          viewBox="0 0 900 175"
           aria-label="Blackjack pays 3 to 2. Dealer stands on all 17."
         >
           <defs>
-            <path id="letter-arc" d="M95 50 Q450 235 805 50" />
-            <path id="rule-arc" d="M145 108 Q450 262 755 108" />
+            <path id="letter-arc" d="M95 15 Q450 145 805 15" />
+            <path id="rule-arc" d="M145 72 Q450 178 755 72" />
           </defs>
-          <path className="table-line" d="M65 106 Q450 354 835 106" />
+          <path className="table-line" d="M65 96 Q450 245 835 96" />
           <text className="table-title">
             <textPath href="#letter-arc" startOffset="50%" textAnchor="middle">
               BLACKJACK PAYS 3 TO 2
@@ -258,7 +266,11 @@ export default function App() {
                 key={i}
                 cards={hand.cards}
                 label={game.hands.length === 1 ? 'Your hand' : `Hand ${i + 1} · ${hand.bet}`}
-                active={game.active === i && game.phase === 'player'}
+                active={
+                  game.active === i && ['player', 'splitting', 'split-dealing'].includes(game.phase)
+                }
+                waiting={hand.cards.length === 1}
+                oneCardOnly={hand.split && hand.cards[0].rank === 'A'}
                 result={hand.result}
                 dealing={game.phase === 'dealing'}
               />

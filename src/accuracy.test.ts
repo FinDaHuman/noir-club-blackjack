@@ -147,9 +147,11 @@ describe('basic-strategy accuracy accounting', () => {
     expect(counts(g)).toEqual({ decisions: 2, correctDecisions: 1, hands: 1, correctHands: 0 });
   });
   it('grades split hands independently while counting the split choice once', () => {
-    let g = start('8', '6', '8', '10', '3', '2', '10', '5');
+    let g = start('8', '6', '8', '10', '3', '10', '2', '5');
     g = reducer(reducer(g, { type: 'SPLIT' }), { type: 'READY' });
+    g = reducer(g, { type: 'READY' });
     g = reducer(reducer(g, { type: 'DOUBLE' }), { type: 'READY' });
+    g = reducer(g, { type: 'READY' });
     g = finish(reducer(g, { type: 'STAND' }));
     expect(counts(g)).toEqual({ decisions: 3, correctDecisions: 2, hands: 2, correctHands: 1 });
     expect(g.history[0].accuracy!.hands).toEqual([

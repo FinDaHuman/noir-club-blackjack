@@ -174,6 +174,8 @@ export function Hand({
   dealer = false,
   preview = false,
   peeking = false,
+  waiting = false,
+  oneCardOnly = false,
 }: {
   cards: Card[];
   label: string;
@@ -184,6 +186,8 @@ export function Hand({
   dealer?: boolean;
   preview?: boolean;
   peeking?: boolean;
+  waiting?: boolean;
+  oneCardOnly?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(300);
@@ -242,10 +246,14 @@ export function Hand({
             {active && <i />}
           </span>
           <b className={`score ${total.total > 21 ? 'busted' : ''}`}>
-            {total.total || '—'}
-            {total.soft && total.total <= 21 && !preview && <small> soft</small>}
+            {waiting ? '—' : total.total || '—'}
+            {!waiting && total.soft && total.total <= 21 && !preview && <small> soft</small>}
           </b>
-          {result && (
+        </div>
+      )}
+      {!dealer && (
+        <div className="hand-status">
+          {result ? (
             <em className={`hand-result ${result}`}>
               {result === 'blackjack'
                 ? 'BLACKJACK'
@@ -253,7 +261,11 @@ export function Hand({
                   ? 'BUST'
                   : result.toUpperCase()}
             </em>
-          )}
+          ) : waiting ? (
+            <span>Waiting for card</span>
+          ) : oneCardOnly ? (
+            <span>One card only</span>
+          ) : null}
         </div>
       )}
     </section>
