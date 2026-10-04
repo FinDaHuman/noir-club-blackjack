@@ -9,6 +9,7 @@ async function seed(page: Page, ranks: string[], patch: Partial<Game> = {}) {
     game,
   });
   await page.goto('/');
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', game.phase);
 }
 async function saved(page: Page) {
   return page.evaluate((key) => JSON.parse(localStorage.getItem(key)!), key) as Promise<Game>;
@@ -193,6 +194,8 @@ test('bet typing, rules dialog, keyboard and reset confirmation', async ({ page 
 test('keyboard play, unfinished-hand recovery and reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await seed(page, ['5', '10', '6', '7', '3']);
+  // Establish normal page focus after React has rendered, before sending a raw key.
+  await page.getByRole('main', { name: 'Blackjack table' }).click({ position: { x: 10, y: 10 } });
   await page.keyboard.press('Space');
   await expect(page.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Hit', exact: true }).click();
