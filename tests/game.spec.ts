@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { newGame, makeShoe, type Card, type Game } from '../src/game';
+import { newGame, makeShoe, reducer, type Card, type Game } from '../src/game';
+import { readFile } from 'node:fs/promises';
 const key = 'noir-club.game.v1';
 async function seed(page: Page, ranks: string[], patch: Partial<Game> = {}) {
   const shoe: Card[] = ranks.map((rank, i) => ({ id: `seed-${i}`, rank, suit: 'spades' }));
@@ -385,4 +386,123 @@ test('strategy room explores all charts, fallback actions and the live hand with
   await page.getByRole('button', { name: 'Learn basic strategy' }).click();
   await expect(page.locator('.live-advice h3')).toHaveText('Split');
   expect(errors).toEqual([]);
+});
+
+test('accuracy and mistake review stay in the tracker and include only completed rounds', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await seed(page, ['10', '6', '2', '10', '2', '5']);
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(page.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Hit', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Stand', exact: true })).toBeEnabled();
+  await expect(page.locator('.accuracy-stats')).toHaveCount(0);
+  await expect(page.getByText(/mistake|accuracy|you chose/i)).toHaveCount(0);
+  await tracker(page);
+  await expect(page.locator('.accuracy-hand-count')).toHaveText('0 of 0 graded hands');
+  await expect(page.locator('.accuracy-decision-count')).toHaveText('0 of 0 decisions correct');
+  await expect(page.locator('.accuracy-pending')).toBeVisible();
+  await expect(page.locator('.accuracy-review')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.getByRole('button', { name: 'Stand', exact: true }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+  await expect(page.locator('.accuracy-stats')).toHaveCount(0);
+  await expect(page.getByText(/mistake|accuracy|you chose/i)).toHaveCount(0);
+  await tracker(page);
+  await expect(page.locator('.accuracy-hand-count')).toHaveText('0 of 1 graded hands');
+  await expect(page.locator('.accuracy-hand-rate')).toHaveText('0%');
+  await expect(page.locator('.accuracy-decision-count')).toHaveText('1 of 2 decisions correct');
+  await expect(page.locator('.accuracy-decision-rate')).toHaveText('50%');
+  await page.locator('.accuracy-review summary').click();
+  await expect(page.locator('.decision-review-list li')).toHaveCount(1);
+  await expect(page.locator('.decision-cards')).toContainText('10♠ 2♠');
+  await expect(page.locator('.decision-cards')).not.toContainText('10♠ 2♠ 2♠');
+  await expect(page.locator('.decision-comparison dd')).toHaveText(['Hit', 'Stand']);
+  expect(
+    await page.getByRole('dialog').evaluate((el) => el.scrollWidth <= el.clientWidth + 1),
+  ).toBe(true);
+  const downloadPromise = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export CSV' }).click();
+  const download = await downloadPromise;
+  const csv = await readFile((await download.path())!, 'utf8');
+  expect(csv.split('\n')[0]).toContain(
+    'Strategy decisions,Correct decisions,Graded hands,Correct hands',
+  );
+  expect(csv.split('\n')[1]).toMatch(/,2,1,1,0$/);
+  const reopened = await page.context().newPage();
+  await reopened.goto('/');
+  await tracker(reopened);
+  await expect(reopened.locator('.accuracy-decision-rate')).toHaveText('50%');
+  await expect(reopened.locator('.accuracy-hand-count')).toHaveText('0 of 1 graded hands');
+  await reopened.getByRole('button', { name: 'Reset session' }).click();
+  await reopened.getByRole('button', { name: 'Start fresh' }).click();
+  await tracker(reopened);
+  await expect(reopened.locator('.accuracy-hand-rate')).toHaveText('—');
+  await expect(reopened.locator('.accuracy-review')).toHaveCount(0);
+  await reopened.close();
+  expect(errors).toEqual([]);
+});
+
+test('tracker grades split hands separately without duplicating the split decision', async ({
+  page,
+}) => {
+  await seed(page, ['8', '6', '8', '10', '3', '2', '10', '5']);
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(page.getByRole('button', { name: 'Split', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Split', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Double', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Double', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Stand', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Stand', exact: true }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+  await tracker(page);
+  await expect(page.locator('.accuracy-hand-count')).toHaveText('1 of 2 graded hands');
+  await expect(page.locator('.accuracy-hand-rate')).toHaveText('50%');
+  await expect(page.locator('.accuracy-decision-count')).toHaveText('2 of 3 decisions correct');
+  await expect(page.locator('.accuracy-decision-rate')).toHaveText('66.7%');
+  await page.locator('.accuracy-review summary').click();
+  await expect(page.locator('.hand-grades')).toHaveText('Hand 1: correct · Hand 2: needs review');
+  await expect(page.locator('.decision-context b')).toHaveText('Hand 2');
+  await expect(page.locator('.decision-comparison dd')).toHaveText(['Stand', 'Double']);
+});
+
+test('older saved rounds remain ungraded while newly dealt hands count', async ({ page }) => {
+  const cards = (ranks: string[]): Card[] =>
+    ranks.map((rank, i) => ({ id: `legacy-${i}`, rank, suit: 'spades' }));
+  let game = newGame([...cards(['10', '8', '9', '9']), ...makeShoe()]);
+  for (const type of ['DEAL', 'READY', 'STAND', 'DEALER_TICK'] as const)
+    game = reducer(game, { type });
+  expect(game.phase).toBe('settled');
+  const old = JSON.parse(JSON.stringify(game));
+  delete old.accuracy;
+  old.hands.forEach((hand: { decisionIds?: number[] }) => delete hand.decisionIds);
+  old.history.forEach((round: { accuracy?: unknown }) => delete round.accuracy);
+  for (const field of [
+    'strategyDecisions',
+    'strategyCorrectDecisions',
+    'strategyHands',
+    'strategyCorrectHands',
+  ])
+    delete old.stats[field];
+  old.shoe = [...cards(['9', '10', '7', '8']), ...makeShoe()];
+  await page.addInitScript(({ key, old }) => localStorage.setItem(key, JSON.stringify(old)), {
+    key,
+    old,
+  });
+  await page.goto('/');
+  await tracker(page);
+  await expect(page.locator('.accuracy-hand-rate')).toHaveText('—');
+  await expect(page.locator('.accuracy-hand-count')).toHaveText('0 of 0 graded hands');
+  await expect(page.getByRole('cell', { name: 'Ungraded', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(page.getByRole('button', { name: 'Surrender', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Surrender', exact: true }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+  await tracker(page);
+  await expect(page.locator('.accuracy-hand-count')).toHaveText('1 of 1 graded hands');
+  await expect(page.locator('.accuracy-decision-rate')).toHaveText('100%');
+  expect(await saved(page)).toMatchObject({ balance: 2525, stats: { hands: 2 } });
 });

@@ -1,7 +1,26 @@
+import { advise, type Move } from './strategy';
+import {
+  accuracySummary,
+  gradeHand,
+  isDecisionAudit,
+  isRoundAccuracy,
+  validDecisionIds,
+  type DecisionAction,
+  type DecisionAudit,
+  type RoundAccuracy,
+} from './accuracy';
+
 export type Suit = 'spades' | 'hearts' | 'diamonds' | 'clubs';
 export type Card = { id: string; rank: string; suit: Suit };
 export type Result = 'blackjack' | 'win' | 'loss' | 'push' | 'surrender';
-export type Hand = { cards: Card[]; bet: number; stood: boolean; split: boolean; result?: Result };
+export type Hand = {
+  cards: Card[];
+  bet: number;
+  stood: boolean;
+  split: boolean;
+  result?: Result;
+  decisionIds?: number[];
+};
 export type Round = {
   id: number;
   time: string;
@@ -13,6 +32,7 @@ export type Round = {
   results: Result[];
   insuranceBet: number;
   insuranceNet: number;
+  accuracy: RoundAccuracy | null;
 };
 export type Stats = {
   rounds: number;
@@ -29,6 +49,10 @@ export type Stats = {
   surrenders: number;
   insuranceWagered: number;
   insuranceNet: number;
+  strategyDecisions: number;
+  strategyCorrectDecisions: number;
+  strategyHands: number;
+  strategyCorrectHands: number;
 };
 export type Game = {
   version: 1;
@@ -49,6 +73,7 @@ export type Game = {
   hands: Hand[];
   active: number;
   insuranceBet: number;
+  accuracy: DecisionAudit | null;
   stats: Stats;
   history: Round[];
   message: string;
@@ -109,6 +134,7 @@ export function newGame(shoe = makeShoe()): Game {
     hands: [],
     active: 0,
     insuranceBet: 0,
+    accuracy: null,
     stats: {
       rounds: 0,
       hands: 0,
@@ -124,6 +150,10 @@ export function newGame(shoe = makeShoe()): Game {
       surrenders: 0,
       insuranceWagered: 0,
       insuranceNet: 0,
+      strategyDecisions: 0,
+      strategyCorrectDecisions: 0,
+      strategyHands: 0,
+      strategyCorrectHands: 0,
     },
     history: [],
     message: 'A seat just for you.',
@@ -145,6 +175,62 @@ export const canSplit = (g: Game) =>
   g.hands[0].cards.length === 2 &&
   g.hands[0].cards[0].rank === g.hands[0].cards[1].rank &&
   g.balance >= g.hands[0].bet;
+export function currentAdvice(game: Game) {
+  if (game.phase === 'insurance')
+    return {
+      action: 'DECLINE_INSURANCE' as DecisionAction,
+      name: 'Decline insurance',
+      reason:
+        'Basic strategy declines this side bet, even with a player blackjack. A 2:1 payout needs a blackjack probability above one third to be profitable.',
+    };
+  if (game.phase !== 'player') return null;
+  const hand = game.hands[game.active];
+  const points = score(hand.cards);
+  const pair = hand.cards.length === 2 && hand.cards[0].rank === hand.cards[1].rank;
+  const advice = advise(
+    pair ? 'pair' : points.soft ? 'soft' : 'hard',
+    pair ? value(hand.cards[0]) : points.total,
+    value(game.dealer[0]),
+    {
+      double: canDouble(game),
+      split: canSplit(game),
+      surrender: canSurrender(game),
+    },
+  );
+  const actions: Record<Move, DecisionAction> = {
+    H: 'HIT',
+    S: 'STAND',
+    Dh: 'DOUBLE',
+    Ds: 'DOUBLE',
+    P: 'SPLIT',
+    Rh: 'SURRENDER',
+  };
+  return { ...advice, action: actions[advice.move] };
+}
+function recordDecision(g: Game, chosen: DecisionAction) {
+  if (!g.accuracy) return; // Older unfinished rounds have no complete decision trail.
+  const hand = g.hands[g.active];
+  if (g.phase === 'insurance' && g.balance < hand.bet / 2) return; // No optional choice.
+  const advice = currentAdvice(g);
+  if (!advice) return;
+  const points = score(hand.cards);
+  const id = g.accuracy.decisions.length + 1;
+  g.accuracy.decisions.push({
+    id,
+    hand: hand.split ? g.active + 1 : 0,
+    source: g.phase === 'insurance' ? 'insurance' : hand.split ? 'split' : 'original',
+    cards: hand.cards.map((c) => `${c.rank}${SUITS[c.suit]}`),
+    total: points.total,
+    soft: points.soft,
+    upcard: `${g.dealer[0].rank}${SUITS[g.dealer[0].suit]}`,
+    chosen,
+    expected: advice.action,
+    correct: chosen === advice.action,
+    explanation: advice.reason,
+    available: { double: canDouble(g), split: canSplit(g), surrender: canSurrender(g) },
+  });
+  hand.decisionIds = [...(hand.decisionIds ?? []), id];
+}
 function draw(g: Game) {
   const card = g.shoe.shift();
   if (!card) throw new Error('Shoe exhausted');
@@ -224,6 +310,19 @@ function settle(g: Game) {
   g.stats.bestWin = Math.max(g.stats.bestWin, net);
   g.stats.insuranceWagered += g.insuranceBet;
   g.stats.insuranceNet += insuranceNet;
+  const accuracy: RoundAccuracy | null = g.accuracy
+    ? {
+        ...g.accuracy,
+        hands: g.hands.map((hand) => gradeHand(hand.decisionIds ?? [], g.accuracy!.decisions)),
+      }
+    : null;
+  if (accuracy) {
+    const summary = accuracySummary(accuracy);
+    g.stats.strategyDecisions += summary.decisions;
+    g.stats.strategyCorrectDecisions += summary.correctDecisions;
+    g.stats.strategyHands += summary.hands;
+    g.stats.strategyCorrectHands += summary.correctHands;
+  }
   g.history = [
     {
       id: g.stats.rounds,
@@ -236,6 +335,7 @@ function settle(g: Game) {
       results: g.hands.map((h) => h.result!),
       insuranceBet: g.insuranceBet,
       insuranceNet,
+      accuracy,
     },
     ...g.history,
   ].slice(0, 100);
@@ -279,6 +379,7 @@ export function reducer(state: Game, action: Action): Game {
       dealer: [],
       active: 0,
       insuranceBet: 0,
+      accuracy: { version: 1, decisions: [] },
       phase: 'dealing',
       message: 'A little anticipation…',
     };
@@ -286,7 +387,7 @@ export function reducer(state: Game, action: Action): Game {
     g.dealer.push(draw(g));
     const second = draw(g);
     g.dealer.push(draw(g));
-    g.hands = [{ cards: [first, second], bet: g.bet, stood: false, split: false }];
+    g.hands = [{ cards: [first, second], bet: g.bet, stood: false, split: false, decisionIds: [] }];
     return g;
   }
   const g: Game = {
@@ -295,14 +396,18 @@ export function reducer(state: Game, action: Action): Game {
     dealer: [...state.dealer],
     hands: state.hands.map((h) => ({ ...h, cards: [...h.cards] })),
     stats: { ...state.stats },
+    accuracy: state.accuracy
+      ? { ...state.accuracy, decisions: [...state.accuracy.decisions] }
+      : null,
   };
   const h = g.hands[g.active];
   if (
     g.phase === 'insurance' &&
     (action.type === 'INSURE' || action.type === 'DECLINE_INSURANCE')
   ) {
+    if (action.type === 'INSURE' && g.balance < h.bet / 2) return state;
+    recordDecision(g, action.type);
     if (action.type === 'INSURE') {
-      if (g.balance < h.bet / 2) return state;
       g.insuranceBet = h.bet / 2;
       g.balance -= g.insuranceBet;
     }
@@ -354,20 +459,24 @@ export function reducer(state: Game, action: Action): Game {
   }
   if (g.phase !== 'player' || !h) return state;
   if (action.type === 'SURRENDER' && canSurrender(g)) {
+    recordDecision(g, action.type);
     h.result = 'surrender';
     h.stood = true;
     return settle(g);
   }
   if (action.type === 'STAND') {
+    recordDecision(g, action.type);
     h.stood = true;
     return nextHand(g);
   }
   if (action.type === 'HIT') {
+    recordDecision(g, action.type);
     h.cards.push(draw(g));
     g.phase = 'hitting';
     return g;
   }
   if (action.type === 'DOUBLE' && canDouble(g)) {
+    recordDecision(g, action.type);
     g.balance -= h.bet;
     h.bet *= 2;
     h.cards.push(draw(g));
@@ -376,6 +485,7 @@ export function reducer(state: Game, action: Action): Game {
     return g;
   }
   if (action.type === 'SPLIT' && canSplit(g)) {
+    recordDecision(g, action.type);
     g.balance -= h.bet;
     const aces = h.cards[0].rank === 'A';
     g.hands = h.cards.map((card) => ({
@@ -383,6 +493,7 @@ export function reducer(state: Game, action: Action): Game {
       bet: h.bet,
       stood: aces,
       split: true,
+      decisionIds: [...(h.decisionIds ?? [])],
     }));
     g.phase = 'splitting';
     g.message = aces ? 'Split aces receive one card each.' : 'Two hands. Two possibilities.';
@@ -442,19 +553,30 @@ export function loadGame(): Game {
       )
         return newGame();
       // Upgrade existing v1 sessions without losing balances or hand history.
+      const accuracy =
+        isDecisionAudit(raw.accuracy) &&
+        raw.hands.every((h) => validDecisionIds(h.decisionIds, raw.accuracy!))
+          ? raw.accuracy
+          : null;
       return {
         ...raw,
+        accuracy,
         insuranceBet: raw.insuranceBet ?? 0,
         stats: {
           ...raw.stats,
           surrenders: raw.stats.surrenders ?? 0,
           insuranceWagered: raw.stats.insuranceWagered ?? 0,
           insuranceNet: raw.stats.insuranceNet ?? 0,
+          strategyDecisions: raw.stats.strategyDecisions ?? 0,
+          strategyCorrectDecisions: raw.stats.strategyCorrectDecisions ?? 0,
+          strategyHands: raw.stats.strategyHands ?? 0,
+          strategyCorrectHands: raw.stats.strategyCorrectHands ?? 0,
         },
         history: raw.history.map((round) => ({
           ...round,
           insuranceBet: round.insuranceBet ?? 0,
           insuranceNet: round.insuranceNet ?? 0,
+          accuracy: isRoundAccuracy(round.accuracy, round.player.length) ? round.accuracy : null,
         })),
         // A completed round belongs in the tracker, not on a newly opened table.
         ...(raw.phase === 'settled'
@@ -463,6 +585,7 @@ export function loadGame(): Game {
               dealer: [],
               hands: [],
               insuranceBet: 0,
+              accuracy: null,
               message: 'Welcome back. Your seat awaits.',
             }
           : {}),

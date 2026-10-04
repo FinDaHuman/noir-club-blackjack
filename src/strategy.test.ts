@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { advise, chartMove, currentAdvice, DEALER_CARDS, type HandKind } from './strategy';
-import { makeShoe, newGame, reducer, type Card } from './game';
+import { advise, chartMove, DEALER_CARDS, type HandKind } from './strategy';
+import { currentAdvice, makeShoe, newGame, reducer, type Card } from './game';
 
 // Independent full chart fixture verified against Wizard of Odds, 4–8 decks / S17 / DAS / late surrender.
 const fixtures: [HandKind, number, string][] = [

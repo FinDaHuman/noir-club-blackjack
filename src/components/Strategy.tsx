@@ -1,15 +1,7 @@
 import { useState } from 'react';
 import { BookOpen, ArrowUpRight } from 'lucide-react';
-import type { Game } from '../game';
-import {
-  advise,
-  cardName,
-  chartMove,
-  currentAdvice,
-  DEALER_CARDS,
-  MOVE_NAMES,
-  type HandKind,
-} from '../strategy';
+import { currentAdvice, type Game } from '../game';
+import { advise, cardName, chartMove, DEALER_CARDS, MOVE_NAMES, type HandKind } from '../strategy';
 import { Dialog } from './Tracker';
 
 const kinds: { kind: HandKind; title: string; note: string; values: number[] }[] = [

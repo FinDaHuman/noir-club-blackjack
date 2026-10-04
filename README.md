@@ -20,6 +20,8 @@ See the [mobile preview](docs/mobile-preview.jpg) and [initial-release verificat
 - Music and effects begin on interaction. Mute them independently from the top bar.
 - Keyboard: Space to deal, H to hit, S to stand, D to double, P to split, R to surrender. Shortcuts do not run while typing or when a dialog is open.
 - Open the player tracker for bankroll trends, win rate, streaks, blackjacks, surrender counts, insurance results and the last 100 rounds. Insurance is included in round net and total wagered. Surrenders count as losses. Export CSV or reset your session there.
+- **Basic-strategy accuracy lives only in the tracker.** See correctly played hands, decision accuracy, and expandable mistake reviews with the cards and dealer upcard at the time, your choice, the recommended action, and its explanation. Nothing is flagged during play. Accuracy updates after a round finishes and measures strategy, regardless of whether you won or lost.
+- A hand is correct when every recorded choice is correct. Split hands are graded separately, with shared insurance/split choices counted once in decision accuracy. Recommendations respect available actions and credits. Hands with no choice and unaffordable insurance prompts are excluded. Older rounds and hands already underway before this feature are ungraded; tracking starts with newly dealt hands. Session totals persist beyond the last 100 rounds available for review. CSV exports include accuracy counts, and resetting the session resets accuracy.
 
 The complete session, including an unfinished hand, persists in local storage on this browser and device. New visits start with an empty table; completed hands stay in the tracker, while unfinished hands resume. Older saved balances and stats are preserved. The game remains playable when storage is blocked, with a visible notice. Clearing browser storage clears progress. No account, backend, analytics, purchases, cash-out or real-money wagering.
 
@@ -42,7 +44,7 @@ React + TypeScript + Vite. Rules and accounting live in `src/game.ts`; audio is 
 
 The felt is an independent background layer. Card motion stays on a raised rendering layer with visible overflow through every hand/stage ancestor. Cards enter from a nearby point above their resting place; the table is never a clipping plane. Hands fan adaptively to the available width. Reduced-motion settings disable movement. Short viewports scroll naturally rather than cutting off the table or controls.
 
-The test suite checks rules and accounting, runs 500-round bankroll invariants, and exercises Chromium and WebKit. Browser tests sample card and face geometry during dealing, splitting, peeking and revealing to detect cards crossing the viewport or the control band. Responsive checks cover widths from 320 to 1536 pixels, portrait and landscape. Browser emulation does not replace a physical-device check.
+The test suite checks rules, accounting, strategy grading, saved-session upgrades, and 500-round bankroll invariants, and exercises Chromium and WebKit. Accuracy checks cover split hands, insurance, unavailable actions, outcome-independent grades, completed-round-only display, tracker-only review, CSV export, persistence and reset. Browser tests sample card and face geometry during dealing, splitting, peeking and revealing to detect cards crossing the viewport or the control band. Responsive checks cover widths from 320 to 1536 pixels, portrait and landscape. Browser emulation does not replace a physical-device check.
 
 ## GitHub Pages
 

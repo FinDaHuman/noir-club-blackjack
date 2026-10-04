@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { ArrowDownToLine, ArrowRight, RotateCcw, X } from 'lucide-react';
 import { canBet, credits, signed, type Game } from '../game';
+import { accuracySummary } from '../accuracy';
+import { AccuracyStats } from './AccuracyStats';
 
 export function Sparkline({ game, large = false }: { game: Game; large?: boolean }) {
   const values = [...game.history].reverse().map((r) => r.balance);
@@ -99,9 +101,10 @@ export function Dialog({
 }
 function exportHistory(game: Game) {
   const csv = [
-    'Round,Time,Player,Dealer,Wager,Net,Balance,Results,Insurance bet,Insurance net',
-    ...game.history.map((r) =>
-      [
+    'Round,Time,Player,Dealer,Wager,Net,Balance,Results,Insurance bet,Insurance net,Strategy decisions,Correct decisions,Graded hands,Correct hands',
+    ...game.history.map((r) => {
+      const a = r.accuracy ? accuracySummary(r.accuracy) : null;
+      return [
         r.id,
         r.time,
         `"${r.player.join(' / ')}"`,
@@ -112,8 +115,9 @@ function exportHistory(game: Game) {
         r.results.join(' / '),
         r.insuranceBet,
         r.insuranceNet,
-      ].join(','),
-    ),
+        ...(a ? [a.decisions, a.correctDecisions, a.hands, a.correctHands] : ['', '', '', '']),
+      ].join(',');
+    }),
   ].join('\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
   const anchor = document.createElement('a');
@@ -150,6 +154,7 @@ export function Tracker({
         </div>
       </div>
       <Sparkline game={game} large />
+      <AccuracyStats game={game} />
       <div className="tracker-grid">
         {[
           ['Hands played', s.hands],
@@ -195,6 +200,7 @@ export function Tracker({
                 <th>Your cards</th>
                 <th>Dealer</th>
                 <th>Result</th>
+                <th>Strategy</th>
                 <th>Net</th>
               </tr>
             </thead>
@@ -213,6 +219,13 @@ export function Tracker({
                     {r.insuranceBet > 0 && (
                       <small className="insurance-result">Insurance {signed(r.insuranceNet)}</small>
                     )}
+                  </td>
+                  <td className="history-accuracy">
+                    {!r.accuracy
+                      ? 'Ungraded'
+                      : r.accuracy.decisions.length
+                        ? `${r.accuracy.decisions.filter((d) => d.correct).length}/${r.accuracy.decisions.length} decisions`
+                        : 'No decision'}
                   </td>
                   <td className={r.net < 0 ? 'negative' : 'positive'}>{signed(r.net)}</td>
                 </tr>
