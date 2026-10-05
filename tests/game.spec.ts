@@ -57,13 +57,16 @@ async function monitorCards(page: Page, duration = 2400, protectHeader = false) 
   await page.bringToFront();
   await page.evaluate(
     ({ duration, protectHeader }) => {
-      (window as any).__cardMonitor = null;
-      const failures: string[] = [];
-      let samples = 0;
-      let frames = 0;
+      const monitor = { failures: [] as string[], samples: 0, done: false, duration };
+      (window as any).__cardMonitor = monitor;
+      const started = performance.now();
+      let timer = 0;
       const measure = () => {
-        samples++;
+        monitor.samples++;
+        const failures = monitor.failures;
         const footer = document.querySelector('.control-deck')!.getBoundingClientRect();
+        const headerBottom = document.querySelector('.topbar')!.getBoundingClientRect().bottom;
+        const ancestors = new Map<Element, { clips: boolean; bottom: number }>();
         if (document.querySelector<HTMLElement>('.app')!.dataset.phase === 'settled') {
           const message = document.querySelector('.table-message')!.getBoundingClientRect();
           if (message.bottom + 8 > footer.top)
@@ -73,51 +76,51 @@ async function monitorCards(page: Page, duration = 2400, protectHeader = false) 
         }
         document.querySelectorAll<HTMLElement>('.playing-card, .card-flipper').forEach((card) => {
           const r = card.getBoundingClientRect();
-          if (
-            protectHeader &&
-            r.top < document.querySelector('.topbar')!.getBoundingClientRect().bottom - 1
-          )
+          if (protectHeader && r.top < headerBottom - 1)
             failures.push('Card animation overlaps header');
           if (r.left < -1 || r.right > innerWidth + 1 || r.bottom > footer.top + 1)
             failures.push(
-              `Card outside safe table at sample ${samples}: ${JSON.stringify(r.toJSON())}`,
+              `Card outside safe table at sample ${monitor.samples}: ${JSON.stringify(r.toJSON())}`,
             );
           let parent = card.parentElement;
           while (parent && parent !== document.body) {
-            const css = getComputedStyle(parent);
-            if (
-              ['hidden', 'clip', 'scroll', 'auto'].includes(css.overflowY) &&
-              parent.getBoundingClientRect().bottom < r.bottom - 1
-            )
+            let ancestor = ancestors.get(parent);
+            if (!ancestor) {
+              const clips = ['hidden', 'clip', 'scroll', 'auto'].includes(
+                getComputedStyle(parent).overflowY,
+              );
+              ancestor = {
+                clips,
+                bottom: clips ? parent.getBoundingClientRect().bottom : Infinity,
+              };
+              ancestors.set(parent, ancestor);
+            }
+            if (ancestor.clips && ancestor.bottom < r.bottom - 1)
               failures.push(`Clipped by ${parent.className}`);
             parent = parent.parentElement;
           }
         });
+        if (performance.now() - started >= duration) {
+          monitor.done = true;
+          clearInterval(timer);
+        }
       };
-      let raf = 0;
-      const tick = () => {
-        frames++;
-        measure();
-        raf = requestAnimationFrame(tick);
-      };
-      raf = requestAnimationFrame(tick);
-      // Headless WebKit may throttle compositor callbacks on a shared Linux runner.
-      // Force fresh layout reads every 16ms as well; preserve all geometry assertions.
-      const timer = setInterval(measure, 16);
-      setTimeout(() => {
-        cancelAnimationFrame(raf);
-        clearInterval(timer);
-        measure();
-        (window as any).__cardMonitor = { failures, frames, samples };
-      }, duration);
+      // One sampler avoids duplicate forced layout work on software-rendered WebKit.
+      // Publish progress continuously, and finish from elapsed time rather than a second timer.
+      timer = window.setInterval(measure, 32);
+      measure();
     },
     { duration, protectHeader },
   );
 }
 async function assertMotion(page: Page) {
+  const duration = await page.evaluate(() => (window as any).__cardMonitor.duration);
   await expect
-    .poll(() => page.evaluate(() => (window as any).__cardMonitor?.samples ?? 0))
-    .toBeGreaterThan(30);
+    .poll(() => page.evaluate(() => (window as any).__cardMonitor.done), {
+      timeout: duration + 5000,
+    })
+    .toBe(true);
+  expect(await page.evaluate(() => (window as any).__cardMonitor.samples)).toBeGreaterThan(30);
   expect(await page.evaluate(() => (window as any).__cardMonitor.failures)).toEqual([]);
 }
 async function assertHandClearance(page: Page) {
