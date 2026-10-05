@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BookOpen, ArrowUpRight } from 'lucide-react';
-import { currentAdvice, type Game } from '../game';
+import { currentAdvice, MAX_HANDS, type Game } from '../game';
 import { advise, cardName, chartMove, DEALER_CARDS, MOVE_NAMES, type HandKind } from '../strategy';
 import { Dialog } from './Tracker';
 
@@ -20,7 +20,7 @@ const kinds: { kind: HandKind; title: string; note: string; values: number[] }[]
   {
     kind: 'pair',
     title: 'Pairs',
-    note: 'Two cards of the same rank. Read this table before the totals.',
+    note: 'Two cards of equal value, including mixed ten-value cards. Read this table before the totals.',
     values: Array.from({ length: 10 }, (_, i) => i + 2),
   },
 ];
@@ -37,10 +37,14 @@ export function Strategy({ game, close }: { game: Game; close: () => void }) {
   const [dealer, setDealer] = useState(10);
   const [stage, setStage] = useState<'original' | 'split' | 'hit'>('original');
   const [funds, setFunds] = useState(true);
+  const [hands, setHands] = useState(2);
+  const forcedAces =
+    stage === 'split' && ((kind === 'pair' && total === 11) || (kind === 'soft' && total === 12));
   const selected = kinds.find((k) => k.kind === kind)!;
   const advice = advise(kind, total, dealer, {
     double: funds && stage !== 'hit',
-    split: funds && stage === 'original',
+    split:
+      funds && (stage === 'original' || (stage === 'split' && hands < MAX_HANDS && !forcedAces)),
     surrender: stage === 'original',
   });
   const live = currentAdvice(game);
@@ -96,6 +100,16 @@ export function Strategy({ game, close }: { game: Game; close: () => void }) {
               ))}
             </select>
           </label>
+          {stage === 'split' && (
+            <label>
+              Hands on the table
+              <select value={hands} onChange={(e) => setHands(Number(e.target.value))}>
+                <option value={2}>2 hands</option>
+                <option value={3}>3 hands</option>
+                <option value={4}>4 hands (split limit)</option>
+              </select>
+            </label>
+          )}
           <label>
             Dealer upcard
             <select value={dealer} onChange={(e) => setDealer(Number(e.target.value))}>
@@ -122,13 +136,18 @@ export function Strategy({ game, close }: { game: Game; close: () => void }) {
           </label>
         </div>
         <p className="strategy-note">
-          Doubling needs two cards and an extra wager. Surrender and splitting require your original
-          two cards. Split aces are automatically finished after one extra card.
+          Doubling needs two cards and an extra wager. Only the original hand can surrender.
+          Equal-value pairs can be re-split up to four hands, with an extra wager each time. Split
+          aces are automatically finished after one extra card and cannot be re-split.
         </p>
         <div className={`strategy-answer move-${advice.move}`} role="status">
           <span className="eyeline">Recommended play</span>
-          <h3>{advice.name}</h3>
-          <p>{advice.reason}</p>
+          <h3>{forcedAces ? 'One card only' : advice.name}</h3>
+          <p>
+            {forcedAces
+              ? 'Split aces receive exactly one extra card each, even when that card is another Ace. This hand is finished automatically; no further choice is scored.'
+              : advice.reason}
+          </p>
         </div>
       </section>
       <section className="strategy-chart" aria-label={`${selected.title} strategy chart`}>
@@ -219,9 +238,10 @@ export function Strategy({ game, close }: { game: Game; close: () => void }) {
         <section>
           <h3>After a split</h3>
           <p>
-            This table allows one split into two hands. No resplitting. Use the hard or soft table
-            for the next decision. You may double a two-card split hand; split aces receive only one
-            card each.
+            Re-split an equal-value pair while you have fewer than four hands and enough credits for
+            another equal wager. Complete the active hand before the next hand is dealt to. You may
+            double a two-card split hand. Split aces receive one card each and cannot be re-split or
+            doubled; their 21 pays 1:1.
           </p>
         </section>
       </div>

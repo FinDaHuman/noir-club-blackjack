@@ -8,15 +8,18 @@ import { Dialog, Rules, Session, Tracker } from './components/Tracker';
 import { Strategy } from './components/Strategy';
 import { Settings } from './components/Settings';
 import { loadSettings, SETTINGS_KEY, SHORTCUTS, SPEED_FACTOR } from './settings';
+import { decisionFeedback, shortChoice, type Feedback } from './coaching';
+import { FeedbackDetails, Hint } from './components/Coach';
 
 export default function App() {
   const [game, dispatch] = useReducer(reducer, undefined, loadGame);
   const [modal, setModal] = useState<
-    'rules' | 'strategy' | 'tracker' | 'reset' | 'settings' | 'refill' | null
+    'rules' | 'strategy' | 'tracker' | 'reset' | 'settings' | 'refill' | 'hint' | 'feedback' | null
   >(null);
   const [settings, setSettings] = useState(loadSettings);
   const [fullscreen, setFullscreen] = useState(false);
   const [notice, setNotice] = useState('');
+  const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [systemReducedMotion, setSystemReducedMotion] = useState(
     () => matchMedia('(prefers-reduced-motion: reduce)').matches,
   );
@@ -39,10 +42,20 @@ export default function App() {
         setModal('refill');
         return;
       }
+      if (action.type === 'DEAL' && canBet(game) && game.balance >= game.bet) setFeedback(null);
+      if (settings.liveFeedback) {
+        const nextFeedback = decisionFeedback(game, action);
+        if (nextFeedback) setFeedback(nextFeedback);
+      }
       dispatch(action);
     },
-    [unlock, game],
+    [unlock, game, settings.liveFeedback],
   );
+  useEffect(() => {
+    if (!feedback || modal) return;
+    const timer = setTimeout(() => setFeedback(null), 6500);
+    return () => clearTimeout(timer);
+  }, [feedback, modal]);
   useEffect(() => {
     audio.configure(settings);
     try {
@@ -157,6 +170,7 @@ export default function App() {
       style={
         {
           '--deal-duration': `${480 * speed}ms`,
+          '--split-deal-duration': `${720 * speed}ms`,
           '--reveal-duration': `${520 * speed}ms`,
           '--peek-duration': `${1050 * speed}ms`,
           '--move-duration': `${350 * speed}ms`,
@@ -212,7 +226,8 @@ export default function App() {
         </nav>
       </header>
       <main
-        className={`table ${game.hands.length > 1 ? 'is-split' : ''}`}
+        className={`table ${game.hands.length > 1 ? 'is-split' : ''} ${game.hands.length > 2 ? 'many-hands' : ''} ${settings.liveFeedback ? 'with-feedback' : ''}`}
+        style={{ '--seats': game.hands.length } as CSSProperties}
         aria-label="Blackjack table"
       >
         <div className="dealer-area">
@@ -269,6 +284,7 @@ export default function App() {
                 }
                 waiting={hand.cards.length === 1}
                 oneCardOnly={hand.split && hand.cards[0].rank === 'A'}
+                split={hand.split}
                 result={hand.result}
                 dealing={game.phase === 'dealing'}
                 speed={speed}
@@ -283,7 +299,21 @@ export default function App() {
           role="status"
           aria-live="polite"
         >
-          <span>{game.message}</span>
+          {settings.liveFeedback && feedback ? (
+            <button
+              className={`decision-feedback ${feedback.correct ? 'correct' : 'incorrect'}`}
+              aria-label="Explain my last choice"
+              onClick={() => setModal('feedback')}
+            >
+              <strong>
+                {shortChoice(feedback.chosen)} ·{' '}
+                {feedback.correct ? 'Correct' : `Better: ${shortChoice(feedback.expected)}`}
+              </strong>
+              <span>Basic strategy · Why?</span>
+            </button>
+          ) : (
+            <span>{game.message}</span>
+          )}
           {game.phase === 'settled' ? (
             <b>{signed(game.history[0]?.net ?? 0)} credits</b>
           ) : preview ? (
@@ -299,12 +329,14 @@ export default function App() {
         act={act}
         continueSession={() => setModal('refill')}
         settings={settings}
+        showHint={() => setModal('hint')}
       />
       {modal === 'rules' && <Rules close={() => setModal(null)} settings={settings} />}
       {modal === 'settings' && (
         <Settings
           settings={settings}
           change={(next) => {
+            if (!next.liveFeedback) setFeedback(null);
             audio.configure(next);
             setSettings(next);
             unlock();
@@ -314,6 +346,12 @@ export default function App() {
         />
       )}
       {modal === 'strategy' && <Strategy game={game} close={() => setModal(null)} />}
+      {modal === 'hint' && settings.strategyHints && (
+        <Hint game={game} close={() => setModal(null)} />
+      )}
+      {modal === 'feedback' && settings.liveFeedback && feedback && (
+        <FeedbackDetails feedback={feedback} close={() => setModal(null)} />
+      )}
       {modal === 'tracker' && (
         <Tracker game={game} close={() => setModal(null)} reset={() => setModal('reset')} />
       )}
@@ -333,6 +371,7 @@ export default function App() {
               disabled={!canRefill(game)}
               onClick={() => {
                 dispatch({ type: 'REFILL' });
+                setFeedback(null);
                 setModal(null);
               }}
             >
@@ -356,6 +395,7 @@ export default function App() {
               disabled={!canBet(game)}
               onClick={() => {
                 dispatch({ type: 'RESET' });
+                setFeedback(null);
                 setModal(null);
               }}
             >

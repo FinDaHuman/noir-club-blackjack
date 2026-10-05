@@ -165,6 +165,28 @@ describe('basic-strategy accuracy accounting', () => {
     g = finish(reducer(g, { type: 'SPLIT' }));
     expect(counts(g)).toEqual({ decisions: 3, correctDecisions: 2, hands: 2, correctHands: 0 });
   });
+  it('grades four re-split hands with shared ancestry and the correct limit fallback', () => {
+    let g = start('3', '6', '3', '10', '3', '3', '3', '7', '9', '10', '10', '5');
+    for (let i = 0; i < 3; i++) {
+      expect(currentAdvice(g)?.action).toBe('SPLIT');
+      for (const type of ['SPLIT', 'READY', 'READY'] as const) g = reducer(g, { type });
+    }
+    expect(currentAdvice(g)?.action).toBe('HIT');
+    g = reducer(reducer(g, { type: 'HIT' }), { type: 'READY' });
+    g = finish(g);
+    expect(counts(g)).toEqual({ decisions: 8, correctDecisions: 8, hands: 4, correctHands: 4 });
+    expect(g.history[0].accuracy!.hands).toEqual([
+      { decisionIds: [1, 2, 3, 4, 5], correct: true },
+      { decisionIds: [1, 2, 3, 6], correct: true },
+      { decisionIds: [1, 2, 7], correct: true },
+      { decisionIds: [1, 8], correct: true },
+    ]);
+    expect(g.accuracy!.decisions.at(-1)?.hand).toBe(4);
+    expect(isDecisionAudit(g.accuracy)).toBe(true);
+    expect(isRoundAccuracy(g.history[0].accuracy, 4)).toBe(true);
+    expect(load(g).history[0].accuracy).toEqual(g.history[0].accuracy);
+    expect(load(g).stats.strategyCorrectHands).toBe(4);
+  });
   it('counts a split-aces choice, but not their forced extra cards', () => {
     const g = finish(reducer(start('A', '6', 'A', '10', 'K', '9', '5'), { type: 'SPLIT' }));
     expect(counts(g)).toEqual({ decisions: 1, correctDecisions: 1, hands: 2, correctHands: 2 });

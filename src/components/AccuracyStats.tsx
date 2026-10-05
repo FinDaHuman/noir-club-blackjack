@@ -49,9 +49,10 @@ export function AccuracyStats({ game }: { game: Game }) {
             could afford and legally take at that moment. Wins and losses do not affect the score.
           </p>
           <p>
-            Split hands are graded separately. Insurance and the original split choice apply to both
-            resulting hands, but each choice counts only once in decision accuracy. Hands with no
-            recorded choice and insurance prompts where you cannot afford insurance are not graded.
+            Split hands are graded separately. Shared choices carry into each resulting hand,
+            including re-splits, but each choice counts only once in decision accuracy. Hands with
+            no recorded choice and insurance prompts where you cannot afford insurance are not
+            graded.
           </p>
           <p>
             Tracking starts with newly dealt hands. Older history and rounds already in progress

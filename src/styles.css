@@ -264,7 +264,7 @@ nav {
   overflow: visible;
   --spread: min(
     calc(var(--card-w) * 0.72),
-    calc((var(--hand-width) - var(--card-w) - 30px) / max(1, var(--count) - 1))
+    calc((100% - var(--card-w) - 30px) / max(1, var(--count) - 1))
   );
 }
 .card-position {

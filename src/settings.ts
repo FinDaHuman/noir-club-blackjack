@@ -17,6 +17,8 @@ export type Settings = {
   reducedMotion: boolean;
   hotkeys: boolean;
   showHints: boolean;
+  strategyHints: boolean;
+  liveFeedback: boolean;
   keys: Record<ShortcutAction, string>;
 };
 export const DEFAULT_SETTINGS: Settings = {
@@ -28,6 +30,8 @@ export const DEFAULT_SETTINGS: Settings = {
   reducedMotion: false,
   hotkeys: true,
   showHints: true,
+  strategyHints: false,
+  liveFeedback: false,
   keys: { HIT: 'h', STAND: 's', DOUBLE: 'd', SPLIT: 'p', SURRENDER: 'r', DEAL: ' ' },
 };
 export const SPEED_FACTOR = { slow: 2, relaxed: 1.5, normal: 1, quick: 0.7, fast: 0.5 };
@@ -37,7 +41,15 @@ export const validKey = (key: string) => /^[a-z0-9 ]$/.test(key);
 export function normalizeSettings(value: unknown): Settings {
   const source = value && typeof value === 'object' ? (value as Partial<Settings>) : {};
   const result = { ...DEFAULT_SETTINGS, keys: { ...DEFAULT_SETTINGS.keys } };
-  for (const key of ['music', 'effects', 'reducedMotion', 'hotkeys', 'showHints'] as const)
+  for (const key of [
+    'music',
+    'effects',
+    'reducedMotion',
+    'hotkeys',
+    'showHints',
+    'strategyHints',
+    'liveFeedback',
+  ] as const)
     if (typeof source[key] === 'boolean') result[key] = source[key];
   for (const key of ['musicVolume', 'effectsVolume'] as const)
     if (typeof source[key] === 'number' && Number.isFinite(source[key]))

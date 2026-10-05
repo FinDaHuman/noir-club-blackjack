@@ -131,6 +131,34 @@ export function Settings({
           Use instant card transitions. Your device’s reduced-motion preference is also respected.
         </p>
       </section>
+      <section className="settings-section" aria-labelledby="practice-heading">
+        <h3 id="practice-heading">Practice tools</h3>
+        <label className="setting-toggle">
+          <span>Live decision feedback</span>
+          <input
+            type="checkbox"
+            checked={settings.liveFeedback}
+            onChange={(e) => update('liveFeedback', e.target.checked)}
+          />
+        </label>
+        <p className="setting-note">
+          Show whether your last choice followed basic strategy. Tap the feedback for an
+          explanation.
+        </p>
+        <label className="setting-toggle">
+          <span>Strategy hints</span>
+          <input
+            type="checkbox"
+            checked={settings.strategyHints}
+            onChange={(e) => update('strategyHints', e.target.checked)}
+          />
+        </label>
+        <p className="setting-note">
+          Add a Hint button for your current hand, including insurance decisions. Hints never play
+          for you. Both tools are off by default. Accuracy is scored the same way with or without
+          help.
+        </p>
+      </section>
       <section className="settings-section desktop-only" aria-labelledby="keyboard-heading">
         <h3 id="keyboard-heading">Keyboard shortcuts</h3>
         <label className="setting-toggle">

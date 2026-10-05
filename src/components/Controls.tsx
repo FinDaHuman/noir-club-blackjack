@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Coins, Minus, Plus, ArrowUpRight } from 'lucide-react';
+import { Coins, Minus, Plus, ArrowUpRight, Lightbulb } from 'lucide-react';
 import { keyLabel, type Settings, type ShortcutAction } from '../settings';
 import {
   canBet,
@@ -16,11 +16,13 @@ export function Controls({
   act,
   continueSession,
   settings,
+  showHint,
 }: {
   game: Game;
   act: (action: Action) => void;
   continueSession: () => void;
   settings: Settings;
+  showHint: () => void;
 }) {
   const shortcut = (action: ShortcutAction) =>
     settings.hotkeys
@@ -203,21 +205,33 @@ export function Controls({
             </button>
           </>
         )}
-        <small className="action-hint">
-          {broke
-            ? 'Add credits and keep your stats'
-            : betting
-              ? 'A little luck. A little instinct.'
-              : game.phase === 'insurance'
-                ? `Optional side bet · pays 2:1 on dealer blackjack${game.balance < game.hands[0].bet / 2 ? ' · insufficient credits' : ''}`
-                : game.phase === 'peeking'
-                  ? 'Dealer is checking the hidden card…'
-                  : playing
-                    ? 'Make your next move'
-                    : game.phase === 'dealer'
-                      ? 'Dealer is playing…'
-                      : 'Cards in motion…'}
-        </small>
+        <div className={`action-hint ${settings.strategyHints ? 'with-strategy-hint' : ''}`}>
+          <small>
+            {broke
+              ? 'Add credits and keep your stats'
+              : betting
+                ? 'A little luck. A little instinct.'
+                : game.phase === 'insurance'
+                  ? `Optional side bet · pays 2:1 on dealer blackjack${game.balance < game.hands[0].bet / 2 ? ' · insufficient credits' : ''}`
+                  : game.phase === 'peeking'
+                    ? 'Dealer is checking the hidden card…'
+                    : playing
+                      ? 'Make your next move'
+                      : game.phase === 'dealer'
+                        ? 'Dealer is playing…'
+                        : 'Cards in motion…'}
+          </small>
+          {settings.strategyHints && (
+            <button
+              className="strategy-hint-button"
+              aria-label="Show strategy hint"
+              disabled={!playing && game.phase !== 'insurance'}
+              onClick={showHint}
+            >
+              <Lightbulb size={13} /> Hint
+            </button>
+          )}
+        </div>
       </div>
     </footer>
   );

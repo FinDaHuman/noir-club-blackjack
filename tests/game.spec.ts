@@ -53,64 +53,89 @@ async function assertViewport(page: Page) {
   await page.evaluate(() => window.scrollTo(0, 500));
   expect(await page.evaluate(() => scrollY)).toBe(0);
 }
-async function monitorCards(page: Page, duration = 2400) {
+async function monitorCards(page: Page, duration = 2400, protectHeader = false) {
   await page.bringToFront();
-  await page.evaluate((duration) => {
-    (window as any).__cardMonitor = null;
-    const failures: string[] = [];
-    let samples = 0;
-    let frames = 0;
-    const measure = () => {
-      samples++;
-      const footer = document.querySelector('.control-deck')!.getBoundingClientRect();
-      if (document.querySelector<HTMLElement>('.app')!.dataset.phase === 'settled') {
-        const message = document.querySelector('.table-message')!.getBoundingClientRect();
-        if (message.bottom + 8 > footer.top)
-          failures.push(
-            `End-of-hand message too close to controls: ${footer.top - message.bottom}px`,
-          );
-      }
-      document.querySelectorAll<HTMLElement>('.playing-card, .card-flipper').forEach((card) => {
-        const r = card.getBoundingClientRect();
-        if (r.left < -1 || r.right > innerWidth + 1 || r.bottom > footer.top + 1)
-          failures.push(
-            `Card outside safe table at sample ${samples}: ${JSON.stringify(r.toJSON())}`,
-          );
-        let parent = card.parentElement;
-        while (parent && parent !== document.body) {
-          const css = getComputedStyle(parent);
-          if (
-            ['hidden', 'clip', 'scroll', 'auto'].includes(css.overflowY) &&
-            parent.getBoundingClientRect().bottom < r.bottom - 1
-          )
-            failures.push(`Clipped by ${parent.className}`);
-          parent = parent.parentElement;
+  await page.evaluate(
+    ({ duration, protectHeader }) => {
+      (window as any).__cardMonitor = null;
+      const failures: string[] = [];
+      let samples = 0;
+      let frames = 0;
+      const measure = () => {
+        samples++;
+        const footer = document.querySelector('.control-deck')!.getBoundingClientRect();
+        if (document.querySelector<HTMLElement>('.app')!.dataset.phase === 'settled') {
+          const message = document.querySelector('.table-message')!.getBoundingClientRect();
+          if (message.bottom + 8 > footer.top)
+            failures.push(
+              `End-of-hand message too close to controls: ${footer.top - message.bottom}px`,
+            );
         }
-      });
-    };
-    let raf = 0;
-    const tick = () => {
-      frames++;
-      measure();
+        document.querySelectorAll<HTMLElement>('.playing-card, .card-flipper').forEach((card) => {
+          const r = card.getBoundingClientRect();
+          if (
+            protectHeader &&
+            r.top < document.querySelector('.topbar')!.getBoundingClientRect().bottom - 1
+          )
+            failures.push('Card animation overlaps header');
+          if (r.left < -1 || r.right > innerWidth + 1 || r.bottom > footer.top + 1)
+            failures.push(
+              `Card outside safe table at sample ${samples}: ${JSON.stringify(r.toJSON())}`,
+            );
+          let parent = card.parentElement;
+          while (parent && parent !== document.body) {
+            const css = getComputedStyle(parent);
+            if (
+              ['hidden', 'clip', 'scroll', 'auto'].includes(css.overflowY) &&
+              parent.getBoundingClientRect().bottom < r.bottom - 1
+            )
+              failures.push(`Clipped by ${parent.className}`);
+            parent = parent.parentElement;
+          }
+        });
+      };
+      let raf = 0;
+      const tick = () => {
+        frames++;
+        measure();
+        raf = requestAnimationFrame(tick);
+      };
       raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    // Headless WebKit may throttle compositor callbacks on a shared Linux runner.
-    // Force fresh layout reads every 16ms as well; preserve all geometry assertions.
-    const timer = setInterval(measure, 16);
-    setTimeout(() => {
-      cancelAnimationFrame(raf);
-      clearInterval(timer);
-      measure();
-      (window as any).__cardMonitor = { failures, frames, samples };
-    }, duration);
-  }, duration);
+      // Headless WebKit may throttle compositor callbacks on a shared Linux runner.
+      // Force fresh layout reads every 16ms as well; preserve all geometry assertions.
+      const timer = setInterval(measure, 16);
+      setTimeout(() => {
+        cancelAnimationFrame(raf);
+        clearInterval(timer);
+        measure();
+        (window as any).__cardMonitor = { failures, frames, samples };
+      }, duration);
+    },
+    { duration, protectHeader },
+  );
 }
 async function assertMotion(page: Page) {
   await expect
     .poll(() => page.evaluate(() => (window as any).__cardMonitor?.samples ?? 0))
     .toBeGreaterThan(30);
   expect(await page.evaluate(() => (window as any).__cardMonitor.failures)).toEqual([]);
+}
+async function assertHandClearance(page: Page) {
+  const collisions = await page.evaluate(() => {
+    const header = document.querySelector('.topbar')!.getBoundingClientRect();
+    const message = document.querySelector('.table-message')!.getBoundingClientRect();
+    return [...document.querySelectorAll('.hand')].flatMap((hand) => {
+      const cards = [...hand.querySelectorAll('.playing-card')].map((card) =>
+        card.getBoundingClientRect(),
+      );
+      const status = hand.querySelector('.hand-status')?.getBoundingClientRect();
+      return [
+        ...(cards.some((r) => r.top < header.bottom - 1) ? ['Card overlaps header'] : []),
+        ...(status && status.bottom > message.top - 2 ? ['Hand label overlaps message'] : []),
+      ];
+    });
+  });
+  expect(collisions).toEqual([]);
 }
 test('deal, double, settlement, tracker, CSV and reload persistence', async ({ page }) => {
   const errors: string[] = [];
@@ -455,6 +480,16 @@ test('strategy room explores all charts, fallback actions and the live hand with
   await page.getByLabel('Credits for double / split').check();
   await page.getByRole('combobox', { name: 'Dealer upcard', exact: true }).selectOption('10');
   await expect(page.locator('.strategy-answer h3')).toHaveText('Split');
+  await page.getByRole('combobox', { name: 'Your hand', exact: true }).selectOption('3');
+  await page.getByRole('combobox', { name: 'Dealer upcard', exact: true }).selectOption('6');
+  await page.getByRole('combobox', { name: 'Hand stage', exact: true }).selectOption('split');
+  await expect(page.locator('.strategy-answer h3')).toHaveText('Split');
+  await page.getByRole('combobox', { name: 'Hands on the table', exact: true }).selectOption('3');
+  await expect(page.locator('.strategy-answer h3')).toHaveText('Split');
+  await page.getByRole('combobox', { name: 'Hands on the table', exact: true }).selectOption('4');
+  await expect(page.locator('.strategy-answer h3')).toHaveText('Hit');
+  await page.getByRole('combobox', { name: 'Your hand', exact: true }).selectOption('11');
+  await expect(page.locator('.strategy-answer h3')).toHaveText('One card only');
   await page.getByRole('button', { name: 'pair 9, 9 versus 7: Stand', exact: true }).click();
   await expect(page.locator('.strategy-answer h3')).toHaveText('Stand');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -707,6 +742,7 @@ for (const [width, height] of [
       await expect(page.locator('.hand-result')).toHaveText(sample.labels);
       await assertMotion(page);
       await assertViewport(page);
+      await assertHandClearance(page);
       await page.evaluate(() => document.fonts.ready);
       const layout = await page.evaluate(() => {
         const rect = (selector: string) =>
@@ -923,6 +959,7 @@ for (const [speed, factor] of [
   ['slow', 2],
   ['quick', 0.7],
   ['relaxed', 1.5],
+  ['normal', 1],
   ['fast', 0.5],
 ] as const) {
   test(`${speed} dealing synchronizes animation and split ace pacing`, async ({ page }) => {
@@ -941,9 +978,41 @@ for (const [speed, factor] of [
     ).toBeCloseTo(0.48 * factor, 2);
     await expect(page.getByRole('button', { name: 'Split', exact: true })).toBeEnabled();
     await monitorCards(page, Math.max(3000, factor * 4500));
+    await page.evaluate(() => {
+      (window as any).__splitMotion = [[], []];
+      (window as any).__splitSampler = setInterval(() => {
+        document.querySelectorAll('.player-hand').forEach((hand, seat) => {
+          const card = hand.querySelector('.split-arrival');
+          if (!card) return;
+          const css = getComputedStyle(card);
+          const matrix = css.transform === 'none' ? new DOMMatrix() : new DOMMatrix(css.transform);
+          (window as any).__splitMotion[seat].push({
+            time: performance.now(),
+            y: matrix.m42,
+            duration: parseFloat(css.animationDuration),
+            opacity: Number(css.opacity),
+            name: css.animationName,
+          });
+        });
+      }, 16);
+    });
     await page.getByRole('button', { name: 'Split', exact: true }).click();
     await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled', { timeout: 12000 });
     await assertMotion(page);
+    const travel = await page.evaluate(() => {
+      clearInterval((window as any).__splitSampler);
+      return (window as any).__splitMotion;
+    });
+    for (const samples of travel) {
+      expect(samples.length).toBeGreaterThan(5);
+      expect(Math.min(...samples.map((s: any) => s.y))).toBeLessThan(-12);
+      expect(samples.at(-1).y).toBeCloseTo(0, 2);
+      expect(samples.every((s: any) => s.opacity === 1 && s.name === 'split-deal-card')).toBe(true);
+      expect(samples[0].duration).toBeCloseTo(0.72 * factor, 2);
+    }
+    // The first card lands fully before the second hand receives its card.
+    const firstLanding = travel[0].find((s: any) => Math.abs(s.y) < 0.2)!;
+    expect(travel[1][0].time - firstLanding.time).toBeGreaterThan(70 * factor);
     expect((await saved(page)).stats.hands).toBe(2);
     await expect(page.locator('.dealer-hand .card-back')).toHaveCount(0);
     await assertViewport(page);
@@ -1043,6 +1112,129 @@ test('sound preview emits an audible signal, resumes audio, and respects mute', 
   await expect(page.locator('.sound-preview-status')).toContainText('raise the volume');
 });
 
+test('coaching defaults off, can be enabled independently, and preferences survive reopening', async ({
+  page,
+}) => {
+  await seed(page, ['10', '6', '2', '10', '9', 'K']);
+  await expect(page.getByRole('button', { name: 'Show strategy hint' })).toHaveCount(0);
+  await expect(page.locator('.decision-feedback')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const live = page.getByRole('checkbox', { name: 'Live decision feedback', exact: true });
+  const hints = page.getByRole('checkbox', { name: 'Strategy hints', exact: true });
+  await expect(live).not.toBeChecked();
+  await expect(hints).not.toBeChecked();
+  await hints.check();
+  await expect(live).not.toBeChecked();
+  await page.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(page.getByRole('button', { name: 'Show strategy hint' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Show strategy hint' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await page.getByRole('button', { name: 'Hit', exact: true }).click();
+  await expect(page.locator('.decision-feedback')).toHaveCount(0);
+  const restored = await page.context().newPage();
+  await restored.goto('./');
+  await restored.bringToFront();
+  await restored.getByRole('button', { name: 'Open settings' }).click();
+  await expect(
+    restored.getByRole('checkbox', { name: 'Strategy hints', exact: true }),
+  ).toBeChecked();
+  await expect(
+    restored.getByRole('checkbox', { name: 'Live decision feedback', exact: true }),
+  ).not.toBeChecked();
+  await restored.getByRole('checkbox', { name: 'Strategy hints', exact: true }).uncheck();
+  await restored.getByRole('checkbox', { name: 'Live decision feedback', exact: true }).check();
+  await restored.getByRole('button', { name: 'Close dialog' }).click();
+  await expect(restored.getByRole('button', { name: 'Show strategy hint' })).toHaveCount(0);
+  await expect(restored.locator('.decision-feedback')).toHaveCount(0); // Enabling never reveals an earlier choice.
+  await restored.close();
+});
+
+for (const [width, height] of [
+  [320, 568],
+  [390, 844],
+  [568, 320],
+  [1366, 768],
+]) {
+  test(`optional hint and feedback fit ${width}x${height} without changing the game`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height });
+    await page.addInitScript(
+      ({ key, settings }) => localStorage.setItem(key, JSON.stringify(settings)),
+      {
+        key: SETTINGS_KEY,
+        settings: { ...DEFAULT_SETTINGS, strategyHints: true, liveFeedback: true },
+      },
+    );
+    await seed(page, ['10', '6', '2', '10', '2', 'K']);
+    await page.getByRole('button', { name: 'Deal me in' }).click();
+    await expect(page.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
+    const initial = await saved(page);
+    await assertViewport(page);
+    await page.getByRole('button', { name: 'Show strategy hint' }).click();
+    await expect(page.locator('.coach-answer h3')).toHaveText('Stand');
+    await expect(page.getByRole('dialog')).toContainText('10♠ 2♠ (12) vs 6♠');
+    expect(await saved(page)).toEqual(initial);
+    await page.getByRole('button', { name: 'Back to my hand' }).click();
+    await monitorCards(page, 1600);
+    await page.getByRole('button', { name: 'Hit', exact: true }).click();
+    await expect(page.locator('.decision-feedback')).toContainText('Hit · Better: Stand');
+    await assertMotion(page);
+    await assertViewport(page);
+    await page.getByRole('button', { name: 'Explain my last choice' }).click();
+    await expect(page.getByRole('dialog')).toContainText('(12) vs 6♠ · before your choice');
+    await expect(page.getByRole('dialog')).not.toContainText('(14) vs');
+    await expect(page.locator('.coach-answer')).toContainText('Recommended: Stand');
+    await page.getByRole('button', { name: 'Back to the table' }).click();
+    await page.getByRole('button', { name: 'Stand', exact: true }).click();
+    await expect(page.locator('.decision-feedback')).toContainText('Stand · Correct');
+    await expect(page.locator('.app')).toHaveAttribute('data-phase', 'settled');
+    await assertViewport(page);
+    expect((await saved(page)).stats).toMatchObject({
+      strategyDecisions: 2,
+      strategyCorrectDecisions: 1,
+    });
+    await page.getByRole('button', { name: 'Open settings' }).click();
+    await page.getByRole('checkbox', { name: 'Live decision feedback', exact: true }).uncheck();
+    await page.getByRole('checkbox', { name: 'Strategy hints', exact: true }).uncheck();
+    await page.getByRole('button', { name: 'Close dialog' }).click();
+    await expect(page.locator('.decision-feedback')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Show strategy hint' })).toHaveCount(0);
+  });
+}
+
+test('coaching handles insurance, unavailable actions, and split-hand advice', async ({ page }) => {
+  await page.addInitScript(
+    ({ key, settings }) => localStorage.setItem(key, JSON.stringify(settings)),
+    {
+      key: SETTINGS_KEY,
+      settings: { ...DEFAULT_SETTINGS, strategyHints: true, liveFeedback: true },
+    },
+  );
+  await seed(page, ['8', 'A', '8', '6', '3', '9', '10']);
+  await page.getByRole('button', { name: 'Deal me in' }).click();
+  await expect(page.locator('.app')).toHaveAttribute('data-phase', 'insurance');
+  await page.getByRole('button', { name: 'Show strategy hint' }).click();
+  await expect(page.locator('.coach-answer h3')).toHaveText('Decline insurance');
+  await page.getByRole('button', { name: 'Back to my hand' }).click();
+  await page.getByRole('button', { name: 'No insurance', exact: true }).click();
+  await expect(page.locator('.decision-feedback')).toContainText('No insurance · Correct');
+  await page.getByRole('button', { name: 'Split', exact: true }).click();
+  await expect(page.locator('.decision-feedback')).toContainText('Split · Correct');
+  await expect(page.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Show strategy hint' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Hand 1');
+  await expect(page.locator('.coach-answer h3')).toHaveText('Hit');
+  await page.getByRole('button', { name: 'Back to my hand' }).click();
+  await page.getByRole('button', { name: 'Stand', exact: true }).click();
+  await expect(page.locator('.decision-feedback')).toContainText('Stand · Better: Hit');
+  await expect(page.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Show strategy hint' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Hand 2');
+  await expect(page.locator('.coach-answer h3')).toHaveText('Stand');
+  await page.getByRole('button', { name: 'Back to my hand' }).click();
+});
+
 test('sound preview reports unavailable audio inside the settings dialog', async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, 'AudioContext', {
@@ -1070,6 +1262,91 @@ test('sound preview reports unavailable audio inside the settings dialog', async
   );
   await restored.close();
 });
+
+for (const [width, height] of [
+  [320, 568],
+  [568, 320],
+  [768, 1024],
+  [1366, 768],
+]) {
+  test(`re-splits to four hands with coaching and safe card motion at ${width}x${height}`, async ({
+    page,
+  }) => {
+    test.setTimeout(45000);
+    await page.setViewportSize({ width, height });
+    await page.addInitScript(
+      ({ key, settings }) => localStorage.setItem(key, JSON.stringify(settings)),
+      {
+        key: SETTINGS_KEY,
+        settings: { ...DEFAULT_SETTINGS, strategyHints: true, liveFeedback: true, speed: 'fast' },
+      },
+    );
+    await seed(page, ['3', '6', '3', '10', '3', '3', '3', '7', '9', '10', '10', '5']);
+    await page.bringToFront();
+    await page.getByRole('button', { name: 'Deal me in' }).click();
+    await expect(page.getByRole('button', { name: 'Split', exact: true })).toBeEnabled();
+    for (let hands = 2; hands <= 4; hands++) {
+      await monitorCards(page, 1600, true);
+      await page.getByRole('button', { name: 'Split', exact: true }).click();
+      await expect(page.locator('.player-hand')).toHaveCount(hands);
+      await expect(page.getByRole('button', { name: 'Hit', exact: true })).toBeEnabled();
+      await expect(page.locator('.decision-feedback')).toContainText('Split · Correct');
+      expect((await saved(page)).balance).toBe(2500 - hands * 50);
+      await assertMotion(page);
+      await assertViewport(page);
+      await assertHandClearance(page);
+      const cards = page.locator('.player-hand').first().locator('.card-position');
+      const first = (await cards.nth(0).boundingBox())!;
+      const second = (await cards.nth(1).boundingBox())!;
+      expect(second.x - first.x).toBeGreaterThan(10); // Both ranks must remain readable.
+    }
+    await expect(page.getByRole('button', { name: 'Split', exact: true })).toBeDisabled();
+    await page.getByRole('button', { name: 'Show strategy hint' }).click();
+    await expect(page.locator('.coach-answer h3')).toHaveText('Hit');
+    await page.getByRole('button', { name: 'Back to my hand' }).click();
+    // Open the saved unfinished four-hand table without running the original page's seed again.
+    await page.getByRole('button', { name: 'Open settings' }).click();
+    const resumed = await page.context().newPage();
+    await resumed.setViewportSize({ width, height });
+    await resumed.goto('./');
+    await resumed.bringToFront();
+    await expect(resumed.locator('.player-hand')).toHaveCount(4);
+    expect((await saved(resumed)).balance).toBe(2300);
+    await monitorCards(resumed, 6500, true);
+    await resumed.getByRole('button', { name: 'Hit', exact: true }).click();
+    expect(
+      await resumed
+        .locator('.player-hand')
+        .first()
+        .locator('.playing-card')
+        .last()
+        .evaluate((el) => ({
+          name: getComputedStyle(el).animationName,
+          duration: parseFloat(getComputedStyle(el).animationDuration),
+        })),
+    ).toEqual({ name: height <= 380 ? 'compact-deal-card' : 'deal-card', duration: 0.24 });
+    for (let hand = 0; hand < 4; hand++) {
+      await expect(resumed.getByRole('button', { name: 'Stand', exact: true })).toBeEnabled();
+      expect((await saved(resumed)).active).toBe(hand);
+      await resumed.getByRole('button', { name: 'Stand', exact: true }).click();
+    }
+    await expect(resumed.locator('.app')).toHaveAttribute('data-phase', 'settled');
+    await assertMotion(resumed);
+    await assertViewport(resumed);
+    await assertHandClearance(resumed);
+    const finished = await saved(resumed);
+    expect(finished.stats).toMatchObject({
+      hands: 4,
+      wagered: 200,
+      strategyDecisions: 8,
+      strategyCorrectDecisions: 8,
+      strategyCorrectHands: 4,
+    });
+    await tracker(resumed);
+    await expect(resumed.getByRole('dialog')).toContainText('100%');
+    await resumed.close();
+  });
+}
 
 function bankruptSession() {
   const shoe: Card[] = Array(7)

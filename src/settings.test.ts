@@ -9,6 +9,18 @@ import {
 
 afterEach(() => vi.unstubAllGlobals());
 describe('saved table settings', () => {
+  it('keeps coaching opt-in for fresh and existing preferences', () => {
+    for (const saved of [{}, { showHints: true }, { strategyHints: 'true', liveFeedback: 1 }])
+      expect(normalizeSettings(saved)).toMatchObject({ strategyHints: false, liveFeedback: false });
+    expect(normalizeSettings({ strategyHints: true })).toMatchObject({
+      strategyHints: true,
+      liveFeedback: false,
+    });
+    expect(normalizeSettings({ liveFeedback: true })).toMatchObject({
+      strategyHints: false,
+      liveFeedback: true,
+    });
+  });
   it.each(Object.keys(SPEED_FACTOR))('preserves the %s speed preference', (speed) => {
     expect(normalizeSettings({ speed }).speed).toBe(speed);
   });

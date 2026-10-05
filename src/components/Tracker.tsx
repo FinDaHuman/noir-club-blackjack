@@ -282,9 +282,11 @@ export function Rules({ close, settings }: { close: () => void; settings: Settin
           <b>Make your move.</b>
           <p>
             Hit to take a card, or stand. Double any two-card hand for one final card. Split a
-            same-rank pair into two equal wagers, once per round. Finish the first split hand before
-            the second receives its next card. You may double after splitting. Split aces receive
-            one card each, dealt in sequence; a split 21 pays 1:1.
+            equal-value pairs, including different ten-value cards, into equal wagers. You may
+            re-split the active pair up to four hands total, with an extra wager each time. Finish
+            the active hand before the next receives its card. You may double after splitting. Split
+            aces receive one card each, dealt in sequence; they cannot be re-split or doubled. A
+            split 21 pays 1:1.
           </p>
         </li>
         <li>

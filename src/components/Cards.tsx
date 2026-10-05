@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Crown } from 'lucide-react';
 import { SUITS, score, type Card, type Hand as HandType } from '../game';
 
@@ -125,6 +125,7 @@ export function PlayingCard({
   peeking = false,
   speed = 1,
   reducedMotion = false,
+  splitArrival = false,
 }: {
   card: Card;
   hidden?: boolean;
@@ -133,6 +134,7 @@ export function PlayingCard({
   peeking?: boolean;
   speed?: number;
   reducedMotion?: boolean;
+  splitArrival?: boolean;
 }) {
   const [showBack, setShowBack] = useState(Boolean(hidden));
   const [flipping, setFlipping] = useState(false);
@@ -154,7 +156,7 @@ export function PlayingCard({
   }, [hidden, speed, reducedMotion]);
   return (
     <div
-      className={`playing-card ${animate ? 'arriving' : ''}`}
+      className={`playing-card ${animate ? (splitArrival ? 'arriving split-arrival' : 'arriving') : ''}`}
       style={{ animationDelay: `${delay}ms` }}
       role="img"
       aria-label={hidden ? 'Face-down card' : `${card.rank} of ${card.suit}`}
@@ -179,6 +181,7 @@ export function Hand({
   peeking = false,
   waiting = false,
   oneCardOnly = false,
+  split = false,
   speed = 1,
   reducedMotion = false,
 }: {
@@ -193,24 +196,15 @@ export function Hand({
   peeking?: boolean;
   waiting?: boolean;
   oneCardOnly?: boolean;
+  split?: boolean;
   speed?: number;
   reducedMotion?: boolean;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(300);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
   const total = score(hidden ? cards.slice(0, 1) : cards);
   return (
     <section
       className={`hand ${dealer ? 'dealer-hand' : 'player-hand'} ${active ? 'active' : ''} ${preview ? 'preview-hand' : ''}`}
       aria-label={label}
-      ref={ref}
     >
       {dealer && (
         <div className="hand-label">
@@ -221,10 +215,7 @@ export function Hand({
           </b>
         </div>
       )}
-      <div
-        className="card-fan"
-        style={{ '--hand-width': `${width}px`, '--count': cards.length } as React.CSSProperties}
-      >
+      <div className="card-fan" style={{ '--count': cards.length } as React.CSSProperties}>
         {cards.map((card, i) => (
           <div
             className="card-position"
@@ -241,7 +232,8 @@ export function Hand({
               hidden={hidden && i === 1}
               peeking={peeking && i === 1}
               delay={dealing ? (i * 2 + (dealer ? 1 : 0)) * 200 * speed : 0}
-              animate={!preview}
+              animate={!preview && !(split && i === 0)}
+              splitArrival={split && i === 1}
               speed={speed}
               reducedMotion={reducedMotion}
             />

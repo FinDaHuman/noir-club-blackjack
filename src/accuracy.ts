@@ -53,7 +53,7 @@ export function isDecisionAudit(value: unknown): value is DecisionAudit {
       (d, i) =>
         d &&
         d.id === i + 1 &&
-        [0, 1, 2].includes(d.hand) &&
+        [0, 1, 2, 3, 4].includes(d.hand) &&
         ['original', 'split', 'insurance'].includes(d.source) &&
         Array.isArray(d.cards) &&
         d.cards.length >= 2 &&

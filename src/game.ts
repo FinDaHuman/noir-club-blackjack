@@ -100,6 +100,7 @@ export type Action =
 
 const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
 export const BANKROLL_REFILL = 2500;
+export const MAX_HANDS = 4;
 export const SUITS: Record<Suit, string> = { spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣' };
 export const value = (card: Card) =>
   card.rank === 'A' ? 11 : ['J', 'Q', 'K'].includes(card.rank) ? 10 : Number(card.rank);
@@ -177,10 +178,12 @@ export const canDouble = (g: Game) =>
   g.balance >= g.hands[g.active].bet;
 export const canSplit = (g: Game) =>
   g.phase === 'player' &&
-  g.hands.length === 1 &&
-  g.hands[0].cards.length === 2 &&
-  g.hands[0].cards[0].rank === g.hands[0].cards[1].rank &&
-  g.balance >= g.hands[0].bet;
+  g.hands.length < MAX_HANDS &&
+  g.hands[g.active]?.cards.length === 2 &&
+  !g.hands[g.active].stood &&
+  !(g.hands[g.active].split && g.hands[g.active].cards[0].rank === 'A') &&
+  value(g.hands[g.active].cards[0]) === value(g.hands[g.active].cards[1]) &&
+  g.balance >= g.hands[g.active].bet;
 export function currentAdvice(game: Game) {
   if (game.phase === 'insurance')
     return {
@@ -192,7 +195,7 @@ export function currentAdvice(game: Game) {
   if (game.phase !== 'player') return null;
   const hand = game.hands[game.active];
   const points = score(hand.cards);
-  const pair = hand.cards.length === 2 && hand.cards[0].rank === hand.cards[1].rank;
+  const pair = hand.cards.length === 2 && value(hand.cards[0]) === value(hand.cards[1]);
   const advice = advise(
     pair ? 'pair' : points.soft ? 'soft' : 'hard',
     pair ? value(hand.cards[0]) : points.total,
@@ -523,13 +526,15 @@ export function reducer(state: Game, action: Action): Game {
   if (action.type === 'SPLIT' && canSplit(g)) {
     recordDecision(g, action.type);
     g.balance -= h.bet;
-    g.hands = h.cards.map((card) => ({
+    const children = h.cards.map((card) => ({
       cards: [card],
       bet: h.bet,
       stood: false,
       split: true,
       decisionIds: [...(h.decisionIds ?? [])],
     }));
+    // Replace only the active hand, leaving completed and waiting hands in table order.
+    g.hands.splice(g.active, 1, ...children);
     g.phase = 'splitting';
     g.message = 'Separating your pair…';
     return g;
@@ -566,7 +571,7 @@ export function loadGame(): Game {
       Array.isArray(raw.dealer) &&
       raw.dealer.every(isCard) &&
       Array.isArray(raw.hands) &&
-      raw.hands.length <= 2 &&
+      raw.hands.length <= MAX_HANDS &&
       raw.hands.every(
         (h, i) =>
           Array.isArray(h.cards) &&
@@ -574,7 +579,7 @@ export function loadGame(): Game {
             (h.cards.length === 1 &&
               h.split &&
               !h.stood &&
-              raw.hands.length === 2 &&
+              raw.hands.length >= 2 &&
               (raw.phase === 'splitting' ||
                 (i > raw.active && ['split-dealing', 'player', 'hitting'].includes(raw.phase))))) &&
           h.cards.every(isCard) &&

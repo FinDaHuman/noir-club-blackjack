@@ -120,8 +120,9 @@ describe('actions, split rules and accounting', () => {
     expect(canSplit(g)).toBe(false);
     expect(reducer(g, { type: 'SPLIT' })).toBe(g);
   });
-  it('splits same-rank pairs only, once, and advances both hands', () => {
-    expect(canSplit(ready('J', '9', 'K', '7'))).toBe(false);
+  it('splits equal-value pairs and advances hands sequentially', () => {
+    expect(canSplit(ready('J', '9', 'K', '7'))).toBe(true);
+    expect(canSplit(ready('3', '9', '4', '7'))).toBe(false);
     let g = reducer(ready('8', '10', '8', '7', '2', '3'), { type: 'SPLIT' });
     expect(g.balance).toBe(2400);
     expect(g.hands.map((h) => h.cards.map((c) => c.rank))).toEqual([['8'], ['8']]);
@@ -149,6 +150,97 @@ describe('actions, split rules and accounting', () => {
     g = reducer(g, { type: 'DOUBLE' });
     expect(g.hands[0].bet).toBe(100);
     expect(g.balance).toBe(2350);
+  });
+  it('re-splits to four hands, charges once per split, and rejects a fifth hand', () => {
+    let g = ready('3', '6', '3', '10', '3', '3', '3', '8', '9', '10', '5');
+    for (let count = 2; count <= 4; count++) {
+      const original = JSON.stringify(g);
+      const split = reducer(g, { type: 'SPLIT' });
+      expect(JSON.stringify(g)).toBe(original);
+      expect(split.hands).toHaveLength(count);
+      expect(split.balance).toBe(2500 - count * 50);
+      expect(reducer(split, { type: 'SPLIT' })).toBe(split);
+      g = reducer(reducer(split, { type: 'READY' }), { type: 'READY' });
+      expect(g.hands[0].cards.map((c) => c.rank)).toEqual(['3', '3']);
+    }
+    expect(canSplit(g)).toBe(false);
+    expect(reducer(g, { type: 'SPLIT' })).toBe(g);
+    const settled = finish(g);
+    expect(settled.hands.map((h) => h.cards.map((c) => c.rank))).toEqual([
+      ['3', '3'],
+      ['3', '8'],
+      ['3', '9'],
+      ['3', '10'],
+    ]);
+    expect(settled.stats).toMatchObject({ rounds: 1, hands: 4, wagered: 200, net: -200 });
+    expect(settled.balance).toBe(2300);
+  });
+  it('re-splits a later hand without replacing completed hands and permits doubling', () => {
+    let g = ready('3', '6', '3', '10', '7', '3', '8', '10', '9', '5');
+    for (const type of ['SPLIT', 'READY', 'READY', 'STAND', 'READY'] as const)
+      g = reducer(g, { type });
+    expect(g.active).toBe(1);
+    const completed = g.hands[0];
+    g = reducer(g, { type: 'SPLIT' });
+    expect(g.hands[0]).toEqual(completed);
+    expect(g.hands).toHaveLength(3);
+    expect(g.active).toBe(1);
+    g = reducer(reducer(g, { type: 'READY' }), { type: 'READY' });
+    expect(canDouble(g)).toBe(true);
+    g = finish(reducer(g, { type: 'DOUBLE' }));
+    expect(g.hands.map((h) => h.bet)).toEqual([50, 100, 50]);
+    expect(g.hands.map((h) => h.cards.map((c) => c.rank))).toEqual([
+      ['3', '7'],
+      ['3', '8', '10'],
+      ['3', '9'],
+    ]);
+    expect(g.stats).toMatchObject({ wagered: 200, hands: 3, net: -100 });
+    expect(g.balance).toBe(2400);
+  });
+  it('requires the extra wager for every re-split and never re-splits Aces', () => {
+    let g = ready('3', '6', '3', '10', '3');
+    for (const type of ['SPLIT', 'READY', 'READY'] as const) g = reducer(g, { type });
+    g = { ...g, balance: 49 };
+    expect(canSplit(g)).toBe(false);
+    expect(reducer(g, { type: 'SPLIT' })).toBe(g);
+    expect(canSplit({ ...g, balance: 50 })).toBe(true);
+    const aces = finish(reducer(ready('A', '6', 'A', '10', 'A', 'A', '5'), { type: 'SPLIT' }));
+    expect(aces.hands.map((h) => h.cards.map((c) => c.rank))).toEqual([
+      ['A', 'A'],
+      ['A', 'A'],
+    ]);
+    expect(aces.stats.wagered).toBe(100);
+    expect(aces.accuracy!.decisions).toHaveLength(1);
+  });
+  it('resumes three and four hands through every re-split stage without extra charges', () => {
+    let g = ready('3', '6', '3', '10', '3', '3', '3', '8', '9', '10', '5');
+    const actions = [
+      'SPLIT',
+      'READY',
+      'READY',
+      'SPLIT',
+      'READY',
+      'READY',
+      'SPLIT',
+      'READY',
+      'READY',
+      'STAND',
+      'READY',
+      'STAND',
+      'READY',
+      'STAND',
+      'READY',
+    ] as const;
+    for (const type of actions) {
+      g = reducer(g, { type });
+      vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(g) });
+      const restored = loadGame();
+      vi.unstubAllGlobals();
+      expect(restored).toEqual(g);
+      g = restored;
+    }
+    expect(g.active).toBe(3);
+    expect(finish(g).stats.wagered).toBe(200);
   });
   it('split aces receive one card and split 21 pays only 1:1', () => {
     const g = finish(reducer(ready('A', '10', 'A', '7', 'K', 'Q'), { type: 'SPLIT' }));
