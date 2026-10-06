@@ -70,6 +70,7 @@ export type Game = {
     | 'settled';
   balance: number;
   bet: number;
+  continueDebt: boolean;
   shoe: Card[];
   dealer: Card[];
   hands: Hand[];
@@ -82,14 +83,13 @@ export type Game = {
 };
 export type Action =
   | { type: 'BET'; amount: number }
+  | { type: 'DOUBLE' | 'SPLIT'; allowDebt?: boolean }
   | {
       type:
         | 'DEAL'
         | 'READY'
         | 'HIT'
         | 'STAND'
-        | 'DOUBLE'
-        | 'SPLIT'
         | 'INSURE'
         | 'DECLINE_INSURANCE'
         | 'SURRENDER'
@@ -134,6 +134,7 @@ export function newGame(shoe = makeShoe()): Game {
     phase: 'betting',
     balance: BANKROLL_REFILL,
     bet: 50,
+    continueDebt: false,
     shoe,
     dealer: [],
     hands: [],
@@ -166,25 +167,30 @@ export function newGame(shoe = makeShoe()): Game {
   };
 }
 export const canBet = (g: Game) => g.phase === 'betting' || g.phase === 'settled';
-export const canRefill = (g: Game) => canBet(g) && g.balance < 10;
+export const canRefill = (g: Game) => canBet(g) && g.balance < 10 && !g.continueDebt;
+export const maxBet = (g: Game) =>
+  g.continueDebt ? 500 : Math.min(500, Math.floor(g.balance / 5) * 5);
+export const canDeal = (g: Game) =>
+  canBet(g) && g.bet >= 10 && (g.continueDebt || g.balance >= g.bet);
 export const canSurrender = (g: Game) =>
   g.phase === 'player' &&
   g.hands.length === 1 &&
   !g.hands[0].split &&
   g.hands[0].cards.length === 2;
-export const canDouble = (g: Game) =>
+export const canDouble = (g: Game, allowDebt = g.continueDebt) =>
   g.phase === 'player' &&
   g.hands[g.active]?.cards.length === 2 &&
-  g.balance >= g.hands[g.active].bet;
-export const canSplit = (g: Game) =>
+  !g.hands[g.active].stood &&
+  (allowDebt || g.balance >= g.hands[g.active].bet);
+export const canSplit = (g: Game, allowDebt = g.continueDebt) =>
   g.phase === 'player' &&
   g.hands.length < MAX_HANDS &&
   g.hands[g.active]?.cards.length === 2 &&
   !g.hands[g.active].stood &&
   !(g.hands[g.active].split && g.hands[g.active].cards[0].rank === 'A') &&
   value(g.hands[g.active].cards[0]) === value(g.hands[g.active].cards[1]) &&
-  g.balance >= g.hands[g.active].bet;
-export function currentAdvice(game: Game) {
+  (allowDebt || g.balance >= g.hands[g.active].bet);
+export function currentAdvice(game: Game, allowDebt = game.continueDebt) {
   if (game.phase === 'insurance')
     return {
       action: 'DECLINE_INSURANCE' as DecisionAction,
@@ -201,8 +207,8 @@ export function currentAdvice(game: Game) {
     pair ? value(hand.cards[0]) : points.total,
     value(game.dealer[0]),
     {
-      double: canDouble(game),
-      split: canSplit(game),
+      double: canDouble(game, allowDebt),
+      split: canSplit(game, allowDebt),
       surrender: canSurrender(game),
     },
   );
@@ -216,11 +222,11 @@ export function currentAdvice(game: Game) {
   };
   return { ...advice, action: actions[advice.move] };
 }
-function recordDecision(g: Game, chosen: DecisionAction) {
+function recordDecision(g: Game, chosen: DecisionAction, allowDebt = g.continueDebt) {
   if (!g.accuracy) return; // Older unfinished rounds have no complete decision trail.
   const hand = g.hands[g.active];
   if (g.phase === 'insurance' && g.balance < hand.bet / 2) return; // No optional choice.
-  const advice = currentAdvice(g);
+  const advice = currentAdvice(g, allowDebt);
   if (!advice) return;
   const points = score(hand.cards);
   const id = g.accuracy.decisions.length + 1;
@@ -236,7 +242,11 @@ function recordDecision(g: Game, chosen: DecisionAction) {
     expected: advice.action,
     correct: chosen === advice.action,
     explanation: advice.reason,
-    available: { double: canDouble(g), split: canSplit(g), surrender: canSurrender(g) },
+    available: {
+      double: canDouble(g, allowDebt),
+      split: canSplit(g, allowDebt),
+      surrender: canSurrender(g),
+    },
   });
   hand.decisionIds = [...(hand.decisionIds ?? []), id];
 }
@@ -361,6 +371,9 @@ function settle(g: Game) {
     ...g.history,
   ].slice(0, 100);
   g.phase = 'settled';
+  if (g.balance > 0) {
+    g.continueDebt = false;
+  }
   g.message =
     g.hands[0].result === 'surrender'
       ? 'Surrendered. Half your wager returned.'
@@ -377,7 +390,7 @@ function settle(g: Game) {
               : g.hands.every((h) => score(h.cards).total > 21)
                 ? 'Busted. A fresh hand awaits.'
                 : 'This one goes to the house.';
-  if (g.balance >= 10 && g.bet > g.balance) g.bet = Math.min(500, Math.floor(g.balance / 5) * 5);
+  if (!g.continueDebt && g.balance >= 10 && g.bet > g.balance) g.bet = maxBet(g);
   return g;
 }
 export function reducer(state: Game, action: Action): Game {
@@ -401,14 +414,11 @@ export function reducer(state: Game, action: Action): Game {
     if (!canBet(state) || !Number.isFinite(action.amount)) return state;
     return {
       ...state,
-      bet: Math.max(
-        10,
-        Math.min(500, Math.floor(state.balance / 5) * 5, Math.round(action.amount / 5) * 5),
-      ),
+      bet: Math.max(10, Math.min(maxBet(state), Math.round(action.amount / 5) * 5)),
     };
   }
   if (action.type === 'DEAL') {
-    if (!canBet(state) || state.balance < state.bet || state.bet < 10) return state;
+    if (!canDeal(state)) return state;
     const g: Game = {
       ...state,
       balance: state.balance - state.bet,
@@ -514,7 +524,8 @@ export function reducer(state: Game, action: Action): Game {
     g.phase = 'hitting';
     return g;
   }
-  if (action.type === 'DOUBLE' && canDouble(g)) {
+  if (action.type === 'DOUBLE' && canDouble(g, g.continueDebt || action.allowDebt === true)) {
+    if (g.balance < h.bet && action.allowDebt === true) g.continueDebt = true;
     recordDecision(g, action.type);
     g.balance -= h.bet;
     h.bet *= 2;
@@ -523,7 +534,8 @@ export function reducer(state: Game, action: Action): Game {
     g.phase = 'hitting';
     return g;
   }
-  if (action.type === 'SPLIT' && canSplit(g)) {
+  if (action.type === 'SPLIT' && canSplit(g, g.continueDebt || action.allowDebt === true)) {
+    if (g.balance < h.bet && action.allowDebt === true) g.continueDebt = true;
     recordDecision(g, action.type);
     g.balance -= h.bet;
     const children = h.cards.map((card) => ({
@@ -550,7 +562,6 @@ export function loadGame(): Game {
     if (
       raw?.version === 1 &&
       Number.isFinite(raw.balance) &&
-      raw.balance >= 0 &&
       Number.isFinite(raw.bet) &&
       raw.bet >= 10 &&
       raw.bet <= 500 &&
@@ -611,6 +622,7 @@ export function loadGame(): Game {
           : null;
       return {
         ...raw,
+        continueDebt: raw.continueDebt === true,
         accuracy,
         insuranceBet: raw.insuranceBet ?? 0,
         stats: {

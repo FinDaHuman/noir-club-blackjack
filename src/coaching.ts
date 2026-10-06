@@ -29,6 +29,9 @@ export function situation(game: Game) {
 export function decisionFeedback(game: Game, action: Action): Feedback | null {
   if (!Object.hasOwn(DECISION_LABELS, action.type)) return null;
   const chosen = action.type as DecisionAction;
+  const allowDebt =
+    game.continueDebt ||
+    ((action.type === 'DOUBLE' || action.type === 'SPLIT') && action.allowDebt === true);
   const legal =
     game.phase === 'insurance'
       ? (chosen === 'INSURE' || chosen === 'DECLINE_INSURANCE') &&
@@ -36,10 +39,10 @@ export function decisionFeedback(game: Game, action: Action): Feedback | null {
       : game.phase === 'player' &&
         (chosen === 'HIT' ||
           chosen === 'STAND' ||
-          (chosen === 'DOUBLE' && canDouble(game)) ||
-          (chosen === 'SPLIT' && canSplit(game)) ||
+          (chosen === 'DOUBLE' && canDouble(game, allowDebt)) ||
+          (chosen === 'SPLIT' && canSplit(game, allowDebt)) ||
           (chosen === 'SURRENDER' && canSurrender(game)));
-  const advice = legal ? currentAdvice(game) : null;
+  const advice = legal ? currentAdvice(game, allowDebt) : null;
   return advice
     ? {
         chosen,

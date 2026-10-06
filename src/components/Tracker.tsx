@@ -304,7 +304,9 @@ export function Rules({ close, settings }: { close: () => void; settings: Settin
           <p>
             Wagers: 10–500 virtual credits in steps of 5. No purchases or cash-out. If your bankroll
             falls below 10, you can add 2,500 credits and keep all your stats, including cumulative
-            losses. Reset your session in the tracker only when you want to clear your stats.
+            losses. If you cannot afford a split or double, you can confirm that move with debt,
+            including on split hands. Debt and your consent stay across rounds and reloads until
+            your bankroll is positive again. Restart in the tracker to clear your session.
           </p>
         </li>
       </ol>

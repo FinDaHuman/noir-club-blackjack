@@ -3,11 +3,13 @@ import { Coins, Minus, Plus, ArrowUpRight, Lightbulb } from 'lucide-react';
 import { keyLabel, type Settings, type ShortcutAction } from '../settings';
 import {
   canBet,
+  canDeal,
   canRefill,
   canDouble,
   canSplit,
   canSurrender,
   credits,
+  maxBet,
   type Action,
   type Game,
 } from '../game';
@@ -42,14 +44,7 @@ export function Controls({
   }, [game.bet, game.phase]);
   const commitBet = () => {
     act({ type: 'BET', amount: Number(draft) });
-    setDraft(
-      String(
-        Math.max(
-          10,
-          Math.min(500, Math.floor(game.balance / 5) * 5, Math.round(Number(draft) / 5) * 5),
-        ),
-      ),
-    );
+    setDraft(String(Math.max(10, Math.min(maxBet(game), Math.round(Number(draft) / 5) * 5))));
   };
   return (
     <footer className="control-deck">
@@ -84,7 +79,7 @@ export function Controls({
             inputMode="numeric"
             type="number"
             min="10"
-            max={Math.min(500, game.balance)}
+            max={Math.max(10, maxBet(game))}
             step="5"
             value={betting ? draft : game.hands.reduce((s, h) => s + h.bet, 0)}
             disabled={!betting || broke}
@@ -97,7 +92,7 @@ export function Controls({
           <button
             className="adjust"
             aria-label="Increase bet"
-            disabled={!betting || game.bet + 5 > Math.min(game.balance, 500)}
+            disabled={!betting || game.bet + 5 > maxBet(game)}
             onClick={() => act({ type: 'BET', amount: game.bet + 5 })}
           >
             <Plus size={16} />
@@ -109,7 +104,7 @@ export function Controls({
           <button
             key={n}
             className={`chip chip-${n} ${game.bet === n ? 'selected' : ''}`}
-            disabled={!betting || n > game.balance}
+            disabled={!betting || n > maxBet(game)}
             aria-label={`Bet ${n} credits`}
             aria-pressed={game.bet === n}
             onClick={() => act({ type: 'BET', amount: n })}
@@ -128,7 +123,7 @@ export function Controls({
               broke ? 'Continue playing' : game.phase === 'settled' ? 'Deal again' : 'Deal me in'
             }
             aria-keyshortcuts={shortcut('DEAL')}
-            disabled={!broke && game.balance < game.bet}
+            disabled={!broke && !canDeal(game)}
             onClick={() => (broke ? continueSession() : act({ type: 'DEAL' }))}
           >
             {broke ? (
@@ -178,7 +173,7 @@ export function Controls({
             </button>
             <button
               className="secondary"
-              disabled={!canDouble(game)}
+              disabled={!canDouble(game, true)}
               aria-label="Double"
               aria-keyshortcuts={shortcut('DOUBLE')}
               onClick={() => act({ type: 'DOUBLE' })}
@@ -187,7 +182,7 @@ export function Controls({
             </button>
             <button
               className="secondary"
-              disabled={!canSplit(game)}
+              disabled={!canSplit(game, true)}
               aria-label="Split"
               aria-keyshortcuts={shortcut('SPLIT')}
               onClick={() => act({ type: 'SPLIT' })}

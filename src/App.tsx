@@ -1,7 +1,19 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type CSSProperties } from 'react';
 import { BarChart3, BookOpen, Expand, Minimize, Settings2, CircleHelp, Spade } from 'lucide-react';
 import { audio } from './audio';
-import { canBet, canRefill, loadGame, reducer, SAVE_KEY, signed, type Action } from './game';
+import {
+  canBet,
+  canDeal,
+  canDouble,
+  canRefill,
+  canSplit,
+  credits,
+  loadGame,
+  reducer,
+  SAVE_KEY,
+  signed,
+  type Action,
+} from './game';
 import { Hand } from './components/Cards';
 import { Controls } from './components/Controls';
 import { Dialog, Rules, Session, Tracker } from './components/Tracker';
@@ -14,7 +26,17 @@ import { FeedbackDetails, Hint } from './components/Coach';
 export default function App() {
   const [game, dispatch] = useReducer(reducer, undefined, loadGame);
   const [modal, setModal] = useState<
-    'rules' | 'strategy' | 'tracker' | 'reset' | 'settings' | 'refill' | 'hint' | 'feedback' | null
+    | 'rules'
+    | 'strategy'
+    | 'tracker'
+    | 'reset'
+    | 'settings'
+    | 'refill'
+    | 'hint'
+    | 'feedback'
+    | 'debt-double'
+    | 'debt-split'
+    | null
   >(null);
   const [settings, setSettings] = useState(loadSettings);
   const [fullscreen, setFullscreen] = useState(false);
@@ -37,12 +59,22 @@ export default function App() {
   const act = useCallback(
     (action: Action) => {
       unlock();
+      if (
+        (action.type === 'DOUBLE' || action.type === 'SPLIT') &&
+        !game.continueDebt &&
+        action.allowDebt !== true &&
+        (action.type === 'DOUBLE' ? canDouble(game, true) : canSplit(game, true)) &&
+        game.balance < game.hands[game.active].bet
+      ) {
+        setModal(action.type === 'DOUBLE' ? 'debt-double' : 'debt-split');
+        return;
+      }
       if (action.type === 'BET') audio.play('chip');
       if (action.type === 'DEAL' && canRefill(game)) {
         setModal('refill');
         return;
       }
-      if (action.type === 'DEAL' && canBet(game) && game.balance >= game.bet) setFeedback(null);
+      if (action.type === 'DEAL' && canDeal(game)) setFeedback(null);
       if (settings.liveFeedback) {
         const nextFeedback = decisionFeedback(game, action);
         if (nextFeedback) setFeedback(nextFeedback);
@@ -354,6 +386,35 @@ export default function App() {
       )}
       {modal === 'tracker' && (
         <Tracker game={game} close={() => setModal(null)} reset={() => setModal('reset')} />
+      )}
+      {(modal === 'debt-double' || modal === 'debt-split') && (
+        <Dialog
+          title={modal === 'debt-double' ? 'Double with debt?' : 'Split with debt?'}
+          close={() => setModal(null)}
+        >
+          <p className="dialog-intro">
+            This move needs {credits(game.hands[game.active].bet)} more credits. Your bankroll is{' '}
+            {credits(game.balance)}. If you continue, it will become{' '}
+            {credits(game.balance - game.hands[game.active].bet)} credits. Any debt left after this
+            round stays in your session. Further hands, splits, and doubles can use debt without
+            asking again until your bankroll is positive. You can restart through Stats whenever a
+            round is complete.
+          </p>
+          <div className="reset-actions">
+            <button className="secondary" onClick={() => setModal(null)}>
+              Cancel
+            </button>
+            <button
+              className="primary"
+              onClick={() => {
+                act({ type: modal === 'debt-double' ? 'DOUBLE' : 'SPLIT', allowDebt: true });
+                setModal(null);
+              }}
+            >
+              {modal === 'debt-double' ? 'Double with debt' : 'Split with debt'}
+            </button>
+          </div>
+        </Dialog>
       )}
       {modal === 'refill' && (
         <Dialog title="Keep your story going" close={() => setModal(null)}>
